@@ -10,23 +10,11 @@ import SwiftData
 
 @main
 struct ProxyAppApp: App {
-    var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            Item.self,
-        ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-
-        do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
-        } catch {
-            fatalError("Could not create ModelContainer: \(error)")
-        }
-    }()
-
+    @StateObject var proxyCore: ProxyCore = ProxyCore()
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(proxyCore: proxyCore)
+                .environmentObject(proxyCore)
         }
-        .modelContainer(sharedModelContainer)
     }
 }
