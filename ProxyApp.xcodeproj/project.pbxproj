@@ -7,20 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		13CFC7AA2D96DA2200DA0685 /* NIOSSL in Frameworks */ = {isa = PBXBuildFile; productRef = 13CFC7A92D96DA2200DA0685 /* NIOSSL */; };
-		13CFC7AD2D96DAAE00DA0685 /* NIO in Frameworks */ = {isa = PBXBuildFile; productRef = 13CFC7AC2D96DAAE00DA0685 /* NIO */; };
-		13CFC7AF2D96DAAE00DA0685 /* NIOConcurrencyHelpers in Frameworks */ = {isa = PBXBuildFile; productRef = 13CFC7AE2D96DAAE00DA0685 /* NIOConcurrencyHelpers */; };
-		13CFC7B12D96DAAE00DA0685 /* NIOCore in Frameworks */ = {isa = PBXBuildFile; productRef = 13CFC7B02D96DAAE00DA0685 /* NIOCore */; };
-		13CFC7B32D96DAAE00DA0685 /* NIOEmbedded in Frameworks */ = {isa = PBXBuildFile; productRef = 13CFC7B22D96DAAE00DA0685 /* NIOEmbedded */; };
-		13CFC7B52D96DAAE00DA0685 /* NIOFoundationCompat in Frameworks */ = {isa = PBXBuildFile; productRef = 13CFC7B42D96DAAE00DA0685 /* NIOFoundationCompat */; };
-		13CFC7B72D96DAAE00DA0685 /* NIOHTTP1 in Frameworks */ = {isa = PBXBuildFile; productRef = 13CFC7B62D96DAAE00DA0685 /* NIOHTTP1 */; };
-		13CFC7B92D96DAAE00DA0685 /* NIOPosix in Frameworks */ = {isa = PBXBuildFile; productRef = 13CFC7B82D96DAAE00DA0685 /* NIOPosix */; };
-		13CFC7BB2D96DAAE00DA0685 /* NIOTLS in Frameworks */ = {isa = PBXBuildFile; productRef = 13CFC7BA2D96DAAE00DA0685 /* NIOTLS */; };
-		13CFC7BD2D96DAAE00DA0685 /* NIOTestUtils in Frameworks */ = {isa = PBXBuildFile; productRef = 13CFC7BC2D96DAAE00DA0685 /* NIOTestUtils */; };
-		13CFC7BF2D96DAAE00DA0685 /* NIOWebSocket in Frameworks */ = {isa = PBXBuildFile; productRef = 13CFC7BE2D96DAAE00DA0685 /* NIOWebSocket */; };
-		13CFC7C12D96DAAE00DA0685 /* _NIOConcurrency in Frameworks */ = {isa = PBXBuildFile; productRef = 13CFC7C02D96DAAE00DA0685 /* _NIOConcurrency */; };
-		13CFC7C32D96DAAE00DA0685 /* _NIOFileSystem in Frameworks */ = {isa = PBXBuildFile; productRef = 13CFC7C22D96DAAE00DA0685 /* _NIOFileSystem */; };
-		13CFC7C52D96DAAE00DA0685 /* _NIOFileSystemFoundationCompat in Frameworks */ = {isa = PBXBuildFile; productRef = 13CFC7C42D96DAAE00DA0685 /* _NIOFileSystemFoundationCompat */; };
+		131F28B12DA9729900FB0D3B /* DGCharts in Frameworks */ = {isa = PBXBuildFile; productRef = 131F28B02DA9729900FB0D3B /* DGCharts */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -57,11 +44,6 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		1322E6802DA7F46400650171 /* New Folder */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = "New Folder";
-			sourceTree = "<group>";
-		};
 		1322E6A52DA7F46800650171 /* ProxyApp */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
@@ -87,20 +69,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				13CFC7AF2D96DAAE00DA0685 /* NIOConcurrencyHelpers in Frameworks */,
-				13CFC7B92D96DAAE00DA0685 /* NIOPosix in Frameworks */,
-				13CFC7AA2D96DA2200DA0685 /* NIOSSL in Frameworks */,
-				13CFC7C12D96DAAE00DA0685 /* _NIOConcurrency in Frameworks */,
-				13CFC7B12D96DAAE00DA0685 /* NIOCore in Frameworks */,
-				13CFC7B72D96DAAE00DA0685 /* NIOHTTP1 in Frameworks */,
-				13CFC7BD2D96DAAE00DA0685 /* NIOTestUtils in Frameworks */,
-				13CFC7BB2D96DAAE00DA0685 /* NIOTLS in Frameworks */,
-				13CFC7C32D96DAAE00DA0685 /* _NIOFileSystem in Frameworks */,
-				13CFC7AD2D96DAAE00DA0685 /* NIO in Frameworks */,
-				13CFC7B52D96DAAE00DA0685 /* NIOFoundationCompat in Frameworks */,
-				13CFC7C52D96DAAE00DA0685 /* _NIOFileSystemFoundationCompat in Frameworks */,
-				13CFC7BF2D96DAAE00DA0685 /* NIOWebSocket in Frameworks */,
-				13CFC7B32D96DAAE00DA0685 /* NIOEmbedded in Frameworks */,
+				131F28B12DA9729900FB0D3B /* DGCharts in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -125,7 +94,6 @@
 			isa = PBXGroup;
 			children = (
 				1322E6A52DA7F46800650171 /* ProxyApp */,
-				1322E6802DA7F46400650171 /* New Folder */,
 				FF34EF3D2D95CC7B0029BED2 /* ProxyAppTests */,
 				FF34EF472D95CC7B0029BED2 /* ProxyAppUITests */,
 				FF34EF282D95CC790029BED2 /* Products */,
@@ -158,25 +126,11 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				1322E6802DA7F46400650171 /* New Folder */,
 				1322E6A52DA7F46800650171 /* ProxyApp */,
 			);
 			name = ProxyApp;
 			packageProductDependencies = (
-				13CFC7A92D96DA2200DA0685 /* NIOSSL */,
-				13CFC7AC2D96DAAE00DA0685 /* NIO */,
-				13CFC7AE2D96DAAE00DA0685 /* NIOConcurrencyHelpers */,
-				13CFC7B02D96DAAE00DA0685 /* NIOCore */,
-				13CFC7B22D96DAAE00DA0685 /* NIOEmbedded */,
-				13CFC7B42D96DAAE00DA0685 /* NIOFoundationCompat */,
-				13CFC7B62D96DAAE00DA0685 /* NIOHTTP1 */,
-				13CFC7B82D96DAAE00DA0685 /* NIOPosix */,
-				13CFC7BA2D96DAAE00DA0685 /* NIOTLS */,
-				13CFC7BC2D96DAAE00DA0685 /* NIOTestUtils */,
-				13CFC7BE2D96DAAE00DA0685 /* NIOWebSocket */,
-				13CFC7C02D96DAAE00DA0685 /* _NIOConcurrency */,
-				13CFC7C22D96DAAE00DA0685 /* _NIOFileSystem */,
-				13CFC7C42D96DAAE00DA0685 /* _NIOFileSystemFoundationCompat */,
+				131F28B02DA9729900FB0D3B /* DGCharts */,
 			);
 			productName = ProxyApp;
 			productReference = FF34EF272D95CC790029BED2 /* ProxyApp.app */;
@@ -261,8 +215,7 @@
 			mainGroup = FF34EF1E2D95CC790029BED2;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				13CFC7A82D96DA2200DA0685 /* XCRemoteSwiftPackageReference "swift-nio-ssl" */,
-				13CFC7AB2D96DAAE00DA0685 /* XCRemoteSwiftPackageReference "swift-nio" */,
+				131F28AF2DA9729900FB0D3B /* XCRemoteSwiftPackageReference "Charts" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = FF34EF282D95CC790029BED2 /* Products */;
@@ -630,94 +583,21 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		13CFC7A82D96DA2200DA0685 /* XCRemoteSwiftPackageReference "swift-nio-ssl" */ = {
+		131F28AF2DA9729900FB0D3B /* XCRemoteSwiftPackageReference "Charts" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/apple/swift-nio-ssl.git";
+			repositoryURL = "https://github.com/danielgindi/Charts.git";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 2.29.3;
-			};
-		};
-		13CFC7AB2D96DAAE00DA0685 /* XCRemoteSwiftPackageReference "swift-nio" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/apple/swift-nio.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 2.81.0;
+				minimumVersion = 5.1.0;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		13CFC7A92D96DA2200DA0685 /* NIOSSL */ = {
+		131F28B02DA9729900FB0D3B /* DGCharts */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 13CFC7A82D96DA2200DA0685 /* XCRemoteSwiftPackageReference "swift-nio-ssl" */;
-			productName = NIOSSL;
-		};
-		13CFC7AC2D96DAAE00DA0685 /* NIO */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 13CFC7AB2D96DAAE00DA0685 /* XCRemoteSwiftPackageReference "swift-nio" */;
-			productName = NIO;
-		};
-		13CFC7AE2D96DAAE00DA0685 /* NIOConcurrencyHelpers */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 13CFC7AB2D96DAAE00DA0685 /* XCRemoteSwiftPackageReference "swift-nio" */;
-			productName = NIOConcurrencyHelpers;
-		};
-		13CFC7B02D96DAAE00DA0685 /* NIOCore */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 13CFC7AB2D96DAAE00DA0685 /* XCRemoteSwiftPackageReference "swift-nio" */;
-			productName = NIOCore;
-		};
-		13CFC7B22D96DAAE00DA0685 /* NIOEmbedded */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 13CFC7AB2D96DAAE00DA0685 /* XCRemoteSwiftPackageReference "swift-nio" */;
-			productName = NIOEmbedded;
-		};
-		13CFC7B42D96DAAE00DA0685 /* NIOFoundationCompat */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 13CFC7AB2D96DAAE00DA0685 /* XCRemoteSwiftPackageReference "swift-nio" */;
-			productName = NIOFoundationCompat;
-		};
-		13CFC7B62D96DAAE00DA0685 /* NIOHTTP1 */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 13CFC7AB2D96DAAE00DA0685 /* XCRemoteSwiftPackageReference "swift-nio" */;
-			productName = NIOHTTP1;
-		};
-		13CFC7B82D96DAAE00DA0685 /* NIOPosix */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 13CFC7AB2D96DAAE00DA0685 /* XCRemoteSwiftPackageReference "swift-nio" */;
-			productName = NIOPosix;
-		};
-		13CFC7BA2D96DAAE00DA0685 /* NIOTLS */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 13CFC7AB2D96DAAE00DA0685 /* XCRemoteSwiftPackageReference "swift-nio" */;
-			productName = NIOTLS;
-		};
-		13CFC7BC2D96DAAE00DA0685 /* NIOTestUtils */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 13CFC7AB2D96DAAE00DA0685 /* XCRemoteSwiftPackageReference "swift-nio" */;
-			productName = NIOTestUtils;
-		};
-		13CFC7BE2D96DAAE00DA0685 /* NIOWebSocket */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 13CFC7AB2D96DAAE00DA0685 /* XCRemoteSwiftPackageReference "swift-nio" */;
-			productName = NIOWebSocket;
-		};
-		13CFC7C02D96DAAE00DA0685 /* _NIOConcurrency */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 13CFC7AB2D96DAAE00DA0685 /* XCRemoteSwiftPackageReference "swift-nio" */;
-			productName = _NIOConcurrency;
-		};
-		13CFC7C22D96DAAE00DA0685 /* _NIOFileSystem */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 13CFC7AB2D96DAAE00DA0685 /* XCRemoteSwiftPackageReference "swift-nio" */;
-			productName = _NIOFileSystem;
-		};
-		13CFC7C42D96DAAE00DA0685 /* _NIOFileSystemFoundationCompat */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 13CFC7AB2D96DAAE00DA0685 /* XCRemoteSwiftPackageReference "swift-nio" */;
-			productName = _NIOFileSystemFoundationCompat;
+			package = 131F28AF2DA9729900FB0D3B /* XCRemoteSwiftPackageReference "Charts" */;
+			productName = DGCharts;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -14,9 +14,8 @@ class ProxyCore: ObservableObject {
     private let executableName = "proxycore"
     private var webSocketTask: URLSessionWebSocketTask?
     private var cancellables = Set<AnyCancellable>()
-    
+    var onNewLog: (ProxyLog) -> Void = { _ in }
     @Published var logs: [ProxyLog] = []
-        
     // Path di installazione finale del binario
     private var execURL: URL {
         FileManager.default
@@ -169,7 +168,7 @@ class ProxyCore: ObservableObject {
             let log = try JSONDecoder().decode(ProxyLog.self, from: data)
             DispatchQueue.main.async {
                 self.logs.append(log)
-                print(self.logs.count)
+                self.onNewLog(log)
             }
         } catch {
             print("❌ Errore parsing log:", error)

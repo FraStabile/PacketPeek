@@ -8,7 +8,8 @@
 
 import Foundation
 
-struct ProxyLog: Codable {
+struct ProxyLog: Codable, Hashable, Identifiable {
+    var id = UUID()
     // Request info
     var method: String
     var url: String
