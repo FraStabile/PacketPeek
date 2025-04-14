@@ -53,7 +53,7 @@ struct ProxyLog: Codable, Hashable, Identifiable {
         self.statusCode = try container.decode(Int.self, forKey: .statusCode)
         self.responseHeaders = try container.decode([String: String].self, forKey: .responseHeaders)
         self.responseBody = try container.decodeIfPresent(String.self, forKey: .responseBody)
-        self.responseTime = try container.decode(Double.self, forKey: .responseTime)
+        self.responseTime = try container.decode(Double.self, forKey: .responseTime).rounded(.up)
 
         // Se il timestamp è una stringa, usa un DateFormatter per convertirlo in Date
         let timestampString = try container.decode(String.self, forKey: .timestamp)

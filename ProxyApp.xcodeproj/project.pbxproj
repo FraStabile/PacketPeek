@@ -28,18 +28,18 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		FF34EF272D95CC790029BED2 /* ProxyApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ProxyApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		FF34EF272D95CC790029BED2 /* PacketPeek.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PacketPeek.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		FF34EF3A2D95CC7B0029BED2 /* ProxyAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ProxyAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		FF34EF442D95CC7B0029BED2 /* ProxyAppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ProxyAppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		1322E6AE2DA7F46800650171 /* Exceptions for "ProxyApp" folder in "ProxyApp" target */ = {
+		1322E6AE2DA7F46800650171 /* Exceptions for "ProxyApp" folder in "PacketPeek" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
 			);
-			target = FF34EF262D95CC790029BED2 /* ProxyApp */;
+			target = FF34EF262D95CC790029BED2 /* PacketPeek */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -47,7 +47,7 @@
 		1322E6A52DA7F46800650171 /* ProxyApp */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				1322E6AE2DA7F46800650171 /* Exceptions for "ProxyApp" folder in "ProxyApp" target */,
+				1322E6AE2DA7F46800650171 /* Exceptions for "ProxyApp" folder in "PacketPeek" target */,
 			);
 			path = ProxyApp;
 			sourceTree = "<group>";
@@ -103,7 +103,7 @@
 		FF34EF282D95CC790029BED2 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				FF34EF272D95CC790029BED2 /* ProxyApp.app */,
+				FF34EF272D95CC790029BED2 /* PacketPeek.app */,
 				FF34EF3A2D95CC7B0029BED2 /* ProxyAppTests.xctest */,
 				FF34EF442D95CC7B0029BED2 /* ProxyAppUITests.xctest */,
 			);
@@ -113,9 +113,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		FF34EF262D95CC790029BED2 /* ProxyApp */ = {
+		FF34EF262D95CC790029BED2 /* PacketPeek */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = FF34EF4E2D95CC7B0029BED2 /* Build configuration list for PBXNativeTarget "ProxyApp" */;
+			buildConfigurationList = FF34EF4E2D95CC7B0029BED2 /* Build configuration list for PBXNativeTarget "PacketPeek" */;
 			buildPhases = (
 				FF34EF232D95CC790029BED2 /* Sources */,
 				FF34EF242D95CC790029BED2 /* Frameworks */,
@@ -128,12 +128,12 @@
 			fileSystemSynchronizedGroups = (
 				1322E6A52DA7F46800650171 /* ProxyApp */,
 			);
-			name = ProxyApp;
+			name = PacketPeek;
 			packageProductDependencies = (
 				131F28B02DA9729900FB0D3B /* DGCharts */,
 			);
 			productName = ProxyApp;
-			productReference = FF34EF272D95CC790029BED2 /* ProxyApp.app */;
+			productReference = FF34EF272D95CC790029BED2 /* PacketPeek.app */;
 			productType = "com.apple.product-type.application";
 		};
 		FF34EF392D95CC7B0029BED2 /* ProxyAppTests */ = {
@@ -222,7 +222,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				FF34EF262D95CC790029BED2 /* ProxyApp */,
+				FF34EF262D95CC790029BED2 /* PacketPeek */,
 				FF34EF392D95CC7B0029BED2 /* ProxyAppTests */,
 				FF34EF432D95CC7B0029BED2 /* ProxyAppUITests */,
 			);
@@ -280,12 +280,12 @@
 /* Begin PBXTargetDependency section */
 		FF34EF3C2D95CC7B0029BED2 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = FF34EF262D95CC790029BED2 /* ProxyApp */;
+			target = FF34EF262D95CC790029BED2 /* PacketPeek */;
 			targetProxy = FF34EF3B2D95CC7B0029BED2 /* PBXContainerItemProxy */;
 		};
 		FF34EF462D95CC7B0029BED2 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = FF34EF262D95CC790029BED2 /* ProxyApp */;
+			target = FF34EF262D95CC790029BED2 /* PacketPeek */;
 			targetProxy = FF34EF452D95CC7B0029BED2 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
@@ -425,8 +425,8 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = ProxyApp/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "";
-				INFOPLIST_KEY_LSApplicationCategoryType = "";
+				INFOPLIST_KEY_CFBundleDisplayName = PacketPeek;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -457,8 +457,8 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = ProxyApp/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "";
-				INFOPLIST_KEY_LSApplicationCategoryType = "";
+				INFOPLIST_KEY_CFBundleDisplayName = PacketPeek;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -553,7 +553,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		FF34EF4E2D95CC7B0029BED2 /* Build configuration list for PBXNativeTarget "ProxyApp" */ = {
+		FF34EF4E2D95CC7B0029BED2 /* Build configuration list for PBXNativeTarget "PacketPeek" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				FF34EF4F2D95CC7B0029BED2 /* Debug */,

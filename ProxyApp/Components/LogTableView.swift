@@ -17,14 +17,26 @@ struct EmptySelectionView: View {
 struct LogTableView: View {
     @ObservedObject var viewModel: HomeViewModel
     let logs: [ProxyLog] // Replace with your actual log type
-    
-    init(viewModel: HomeViewModel, logs: [ProxyLog]) {
+    @Binding var filter: String
+    init(viewModel: HomeViewModel, logs: [ProxyLog], filter: Binding<String>) {
         self._viewModel = ObservedObject(wrappedValue: viewModel)
         self.logs = logs
+        self._filter = filter
+    }
+    
+    
+    private var filteredLogs: [ProxyLog] {
+        print("filter: \(filter)")
+        if filter.isEmpty {
+            return logs
+        }
+        return logs.filter {
+            $0.clientIP.lowercased().contains(filter.lowercased()) || $0.method.lowercased().contains(filter.lowercased()) || $0.url.lowercased().contains(filter.lowercased())
+        }
     }
     
     var body: some View {
-        Table(logs, selection: $viewModel.selectedLogID) {
+        Table(filteredLogs, selection: $viewModel.selectedLogID) {
             TableColumn("Client") { log in
                 Text(log.clientIP)
             }
@@ -50,6 +62,13 @@ struct LogTableView: View {
                     .truncationMode(.middle)
             }
             
+        }
+        .contextMenu(forSelectionType: ProxyLog.ID.self) { proxyLogs in
+            if let selected = logs.first(where: { $0.id == proxyLogs.first }) {
+                Button("Export") {
+                    viewModel.exportRequestToTxt(request: selected)
+                }
+            }
         }
     }
 }

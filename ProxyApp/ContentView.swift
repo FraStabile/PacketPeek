@@ -11,8 +11,10 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var proxyCore: ProxyCore
+    @EnvironmentObject private var authViewModel: AuthorizeAppViewModel
     @StateObject private var viewModel: HomeViewModel
-    
+    @State private var searchIsActive: Bool = false
+    @State private var searchText: String = ""
     @State private var selectedBasePath: BasePathModel?
     
     init(proxyCore: ProxyCore) {
@@ -33,26 +35,67 @@ struct ContentView: View {
                     Image(systemName: "play.fill")
                 }
                 .disabled(proxyCore.isRunning)
-                .padding(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 8))
+                .padding(.trailing, 8)
+
                 Button {
                     proxyCore.stopDaemon()
                 } label: {
                     Image(systemName: "stop.fill")
                 }
                 .disabled(!proxyCore.isRunning)
-                HStack {
+
+                HStack(spacing: 10) {
+                    Image(systemName: "network")
+                        .foregroundStyle(.secondary)
+
+                    if proxyCore.isRunning {
+                        HStack(spacing: 12) {
+                            Text("127.0.0.1:8080")
+                                .font(.caption)
+                                .foregroundColor(.primary)
+
+                            if let localIP = viewModel.ipOnEthernet() {
+                                Text("\(localIP):8080")
+                                    .font(.caption)
+                                    .foregroundColor(.primary)
+                            } else {
+                                Text("LAN IP: N/A")
+                                    .font(.caption2)
+                                    .foregroundColor(.gray)
+                            }
+
+                            Text("Running")
+                                .font(.caption2)
+                                .foregroundColor(.green)
+                        }
+                    } else {
+                        HStack(spacing: 12) {
+                            Text("Proxy Offline")
+                                .font(.caption)
+                                .foregroundColor(.gray)
+                            Text("Click ▶ to start")
+                                .font(.caption2)
+                                .foregroundColor(.gray)
+                        }
+                    }
+
                     Circle()
-                        .fill(proxyCore.isRunning ? Color.green : Color.red)
-                        .frame(width: 20, height: 20)
-                        .scaleEffect(proxyCore.isRunning ? 1 : 0.2)
-                    Text(proxyCore.isRunning ? "Running" : "Not Running")
+                        .fill(proxyCore.isRunning ? Color.green : Color.gray)
+                        .frame(width: 10, height: 10)
                 }
                 .padding(8)
-                .background(Color.gray.opacity(0.2))
-                .cornerRadius(10)
-                
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color(.windowBackgroundColor).opacity(0.6))
+                )
             }
         }
+
+        
+        .sheet(isPresented: $authViewModel.showAuthorizationSheet) {
+            AuthAppView()
+        }
+        .navigationTitle("")
     }
     
     // MARK: - Sidebar (Left)
@@ -87,14 +130,41 @@ struct ContentView: View {
     
     private var detailView: some View {
         VSplitView {
-            LogTableView(viewModel: viewModel, logs: viewModel.listBasePathRequest())
+            VStack(spacing: 0) {
+                KeyCaptureView { event in
+                    if event.modifierFlags.contains(.command) && event.characters == "f" {
+                        searchIsActive.toggle()
+                    }
+                }
+                .frame(width: 0, height: 0)
+                
+                if searchIsActive {
+                    HStack {
+                        TextField("Cerca...", text: $searchText)
+                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                            .padding(8)
+                        Button("Cancel") {
+                            searchIsActive = false
+                            searchText = ""
+                        }
+                        .padding(.trailing, 8)
+                    }
+                }
+                
+                // PRIMO PANNELLO: tabella con i risultati filtrati
+                LogTableView(viewModel: viewModel, logs: viewModel.listBasePathRequest(), filter: $searchText)
+            }
             
+            // SECONDO PANNELLO: Dettaglio
             if let selected = viewModel.selectedLog {
-                Divider()
                 LogDetailView(log: selected)
-                    .frame(height: 300) // altezza del pannello in basso
-                    .transition(.move(edge: .bottom))
+                    .frame(minHeight: 200, maxHeight: .infinity)
+            } else {
+                Text("Nessun log selezionato")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .foregroundStyle(.secondary)
             }
         }
+        
     }
 }
