@@ -1,5 +1,7 @@
 # PacketPeek
 
+<img src="Icon.png" alt="drawing" width="250"/>
+
 **PacketPeek** is a macOS app built with SwiftUI that lets you **inspect, intercept, and mock HTTP/HTTPS traffic** from your local network. It acts as a local proxy server and provides a developer-friendly UI to monitor and manipulate network requests in real-time.
 
 
