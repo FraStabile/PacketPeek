@@ -68,5 +68,43 @@ struct ProxyLog: Codable, Hashable, Identifiable {
         self.isSimulator = try container.decode(Bool.self, forKey: .isSimulator)
         self.appIdentifier = try container.decodeIfPresent(String.self, forKey: .appIdentifier)
     }
+    
+    init(
+           method: String = "",
+           url: String = "",
+           `protocol`: String = "",
+           clientIP: String = "",
+           requestHeaders: [String: String] = [:],
+           requestBody: String? = nil,
+           statusCode: Int = 200,
+           responseHeaders: [String: String] = [:],
+           responseBody: String? = nil,
+           responseTime: Double = 0.0,
+           timestamp: Date = Date(),
+           completed: Date = Date(),
+           userAgent: String? = nil,
+           deviceInfo: String? = nil,
+           isSimulator: Bool = false,
+           appIdentifier: String? = nil
+       ) {
+           self.method = method
+           self.url = url
+           self.`protocol` = `protocol`
+           self.clientIP = clientIP
+           self.requestHeaders = requestHeaders
+           self.requestBody = requestBody
+           self.statusCode = statusCode
+           self.responseHeaders = responseHeaders
+           self.responseBody = responseBody
+           self.responseTime = responseTime
+           self.timestamp = timestamp
+           self.completed = completed
+           self.userAgent = userAgent
+           self.deviceInfo = deviceInfo
+           self.isSimulator = isSimulator
+           self.appIdentifier = appIdentifier
+       }
+    
+    
 }
 

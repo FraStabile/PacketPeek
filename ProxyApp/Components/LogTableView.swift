@@ -16,6 +16,8 @@ struct EmptySelectionView: View {
 
 struct LogTableView: View {
     @ObservedObject var viewModel: HomeViewModel
+    @EnvironmentObject var modalRouter: ModalRouter
+    @EnvironmentObject var editViewModel: MockModalEditViewModel
     let logs: [ProxyLog] // Replace with your actual log type
     @Binding var filter: String
     init(viewModel: HomeViewModel, logs: [ProxyLog], filter: Binding<String>) {
@@ -68,7 +70,12 @@ struct LogTableView: View {
                 Button("Export") {
                     viewModel.exportRequestToTxt(request: selected)
                 }
+                Button("Mock Request") {
+                    editViewModel.setupProxyLog(proxyLog: selected)
+                    modalRouter.activeModal = .editMock
+                }
             }
         }
+        
     }
 }

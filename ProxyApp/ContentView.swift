@@ -15,6 +15,7 @@ struct ContentView: View {
     @StateObject private var viewModel: HomeViewModel
     @State private var searchIsActive: Bool = false
     @State private var searchText: String = ""
+    @State private var searchPath: String = ""
     @State private var selectedBasePath: BasePathModel?
     
     init(proxyCore: ProxyCore) {
@@ -52,16 +53,13 @@ struct ContentView: View {
                         HStack(spacing: 12) {
                             Text("127.0.0.1:8080")
                                 .font(.caption)
-                                .foregroundColor(.primary)
 
                             if let localIP = viewModel.ipOnEthernet() {
                                 Text("\(localIP):8080")
                                     .font(.caption)
-                                    .foregroundColor(.primary)
                             } else {
                                 Text("LAN IP: N/A")
                                     .font(.caption2)
-                                    .foregroundColor(.gray)
                             }
 
                             Text("Running")
@@ -100,8 +98,18 @@ struct ContentView: View {
     
     // MARK: - Sidebar (Left)
     private var sidebar: some View {
-        List(selection: $selectedBasePath) {
-            ForEach(viewModel.agents) { agent in
+        
+        var filterPath: [AgentModel] {
+            if searchPath.isEmpty {
+                return viewModel.agents
+            }
+            return viewModel.agents.filter({$0.basePaths.contains(where: {$0.basePath.lowercased().contains(searchPath.lowercased())})})
+        }
+        
+        return List(selection: $selectedBasePath) {
+            TextField("Cerca...", text: $searchPath)
+                .padding(.vertical)
+            ForEach(filterPath) { agent in
                 Section(header: Text(agent.ip).bold()) {
                     ForEach(agent.basePaths) { basePath in
                         let isSelected = viewModel.filterIP == agent.ip && viewModel.filterPath == basePath.basePath

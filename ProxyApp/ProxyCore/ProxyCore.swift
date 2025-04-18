@@ -20,51 +20,25 @@ class ProxyCore: ObservableObject {
     private var execURL: URL {
         FileManager.default
             .homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/AstroProxy/\(executableName)")
+            .appendingPathComponent("Library/Application Support/PacketPeek/\(executableName)")
     }
     
     // Directory di lavoro del processo (dove può scrivere file)
     private var workingDirectory: URL {
         FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("AstroProxyRuntime")
+            .appendingPathComponent("PacketPeekRuntime")
     }
     
     init() {
-        installExecutableIfNeeded()
-    }
-    
-    // MARK: - Installazione Binario
-    
-    private func installExecutableIfNeeded() {
-        let fileManager = FileManager.default
-        
-        guard !isExecutableInstalled(at: execURL) else { return }
-        
-        guard let sourceURL = Bundle.main.resourceURL?.appendingPathComponent(executableName) else {
-            print("⚠️ Binario non trovato nel bundle.")
-            return
-        }
-        
-        do {
-            try fileManager.createDirectory(at: execURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try fileManager.copyItem(at: sourceURL, to: execURL)
-            try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: execURL.path)
-            print("✅ Binario installato con successo.")
-        } catch {
-            print("❌ Errore durante l'installazione del binario:", error)
-        }
-    }
-    
-    private func isExecutableInstalled(at url: URL) -> Bool {
-        FileManager.default.isExecutableFile(atPath: url.path)
+        let _ = ExecutableInstaller()
     }
     
     // MARK: - Start / Stop del processo
     
     func startDaemon() {
         let process = Process()
-        process.executableURL = execURL
+        process.executableURL = ExecutableInstaller().execURL
         process.arguments = [] // Aggiungi argomenti se necessari
         
         // Imposta working directory scrivibile

@@ -7,34 +7,50 @@
 
 import SwiftUI
 import SwiftData
-
+import Papyrus
 @main
 struct ProxyAppApp: App {
     @StateObject var proxyCore: ProxyCore = ProxyCore()
     @StateObject var authViewModel: AuthorizeAppViewModel = AuthorizeAppViewModel()
-    @State private var showTutorialModal = false
-    
+    @StateObject var mockEditorViewModel: MockModalEditViewModel = MockModalEditViewModel()
+    @StateObject var modalRouter = ModalRouter()
+    var mainProvider: MainProvider = MainProvider()
     var body: some Scene {
         WindowGroup {
             ContentView(proxyCore: proxyCore)
+                .sheet(item: $modalRouter.activeModal) { modal in
+                    switch modal {
+                    case .tutorial:
+                        TutorialModalView()
+                    case .mockManager:
+                        MockManagerView(viewModel: MockManagerViewModel())
+                    case .editMock:
+                        MockModalEditView(viewModel: mockEditorViewModel)
+                    case .authorizeApps:
+                        AuthAppView()
+                    }
+                }
                 .environmentObject(proxyCore)
                 .environmentObject(authViewModel)
-                .sheet(isPresented: $showTutorialModal) {
-                    TutorialModalView()
-                }
+                .environmentObject(mockEditorViewModel)
+                .environmentObject(modalRouter)
+                .environmentObject(MainProvider())
         }
         .commands {
             CommandMenu("Development") {
                 Button("Authorize Apps") {
                     authViewModel.fetchAuthorizedApps()
-                    authViewModel.showAuthorizationSheet.toggle()
+                    modalRouter.activeModal = .authorizeApps
                 }
                 .keyboardShortcut("A", modifiers: [.command, .shift])
+                Button("Mock Manager") {
+                    modalRouter.activeModal = .mockManager
+                }
             }
             
             CommandGroup(after: CommandGroupPlacement.help) {
                 Button("Tutorial") {
-                    showTutorialModal = true
+                    modalRouter.activeModal = .tutorial
                 }
             }
         }

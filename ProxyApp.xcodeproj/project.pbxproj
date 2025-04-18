@@ -8,6 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		131F28B12DA9729900FB0D3B /* DGCharts in Frameworks */ = {isa = PBXBuildFile; productRef = 131F28B02DA9729900FB0D3B /* DGCharts */; };
+		1338851C2DAF9FCA009E8B0C /* Icon.png in Resources */ = {isa = PBXBuildFile; fileRef = 1338851B2DAF9FCA009E8B0C /* Icon.png */; };
+		133885A62DB135B7009E8B0C /* Papyrus in Frameworks */ = {isa = PBXBuildFile; productRef = 133885A52DB135B7009E8B0C /* Papyrus */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -28,6 +30,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		1338851B2DAF9FCA009E8B0C /* Icon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = Icon.png; sourceTree = "<group>"; };
 		FF34EF272D95CC790029BED2 /* PacketPeek.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PacketPeek.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		FF34EF3A2D95CC7B0029BED2 /* ProxyAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ProxyAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		FF34EF442D95CC7B0029BED2 /* ProxyAppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ProxyAppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -70,6 +73,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				131F28B12DA9729900FB0D3B /* DGCharts in Frameworks */,
+				133885A62DB135B7009E8B0C /* Papyrus in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -97,6 +101,7 @@
 				FF34EF3D2D95CC7B0029BED2 /* ProxyAppTests */,
 				FF34EF472D95CC7B0029BED2 /* ProxyAppUITests */,
 				FF34EF282D95CC790029BED2 /* Products */,
+				1338851B2DAF9FCA009E8B0C /* Icon.png */,
 			);
 			sourceTree = "<group>";
 		};
@@ -131,6 +136,7 @@
 			name = PacketPeek;
 			packageProductDependencies = (
 				131F28B02DA9729900FB0D3B /* DGCharts */,
+				133885A52DB135B7009E8B0C /* Papyrus */,
 			);
 			productName = ProxyApp;
 			productReference = FF34EF272D95CC790029BED2 /* PacketPeek.app */;
@@ -216,6 +222,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				131F28AF2DA9729900FB0D3B /* XCRemoteSwiftPackageReference "Charts" */,
+				133885A42DB135B7009E8B0C /* XCRemoteSwiftPackageReference "papyrus" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = FF34EF282D95CC790029BED2 /* Products */;
@@ -234,6 +241,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1338851C2DAF9FCA009E8B0C /* Icon.png in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -591,6 +599,14 @@
 				minimumVersion = 5.1.0;
 			};
 		};
+		133885A42DB135B7009E8B0C /* XCRemoteSwiftPackageReference "papyrus" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/joshuawright11/papyrus.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.1.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -598,6 +614,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 131F28AF2DA9729900FB0D3B /* XCRemoteSwiftPackageReference "Charts" */;
 			productName = DGCharts;
+		};
+		133885A52DB135B7009E8B0C /* Papyrus */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 133885A42DB135B7009E8B0C /* XCRemoteSwiftPackageReference "papyrus" */;
+			productName = Papyrus;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

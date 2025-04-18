@@ -49,6 +49,7 @@ type ProxyServer struct {
 	mu          sync.RWMutex
 	appsManager *MonitoredAppsManager
 	clients     map[chan RequestLog]struct{}
+	mockManager *MockManager
 }
 
 func (p *ProxyServer) Subscribe() chan RequestLog {
@@ -105,6 +106,7 @@ func NewProxyServer(certManager *cert.CertManager) *ProxyServer {
 		certManager: certManager,
 		appsManager: NewMonitoredAppsManager("monitored_apps.json"),
 		clients:     make(map[chan RequestLog]struct{}),
+		mockManager: NewMockManager("mocks.json"),
 	}
 }
 
@@ -190,7 +192,6 @@ func (p *ProxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[HTTPS] Nuova richiesta da %s a %s", r.RemoteAddr, r.Host)
 
-	// Prepara il log per HTTPS
 	logEntry := RequestLog{
 		Timestamp:       time.Now(),
 		Method:          r.Method,
@@ -202,36 +203,28 @@ func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 		UserAgent:       r.UserAgent(),
 	}
 
-	// Copia gli header della richiesta
 	for k, v := range r.Header {
 		logEntry.RequestHeaders[k] = strings.Join(v, ", ")
 	}
 
-	// Aggiungi device info e controlla se è il simulatore
 	ua := user_agent.New(r.UserAgent())
 	browser, version := ua.Browser()
 	logEntry.DeviceInfo = fmt.Sprintf("%s %s / %s %s", ua.Platform(), ua.OS(), browser, version)
-	// Controlla se la richiesta viene dal simulatore iOS
 	if ua.OS() == "iOS" && strings.Contains(r.UserAgent(), "Simulator") {
 		logEntry.IsSimulator = true
-
-		// Cerca di estrarre l'identificatore dell'app
 		bundleID := r.Header.Get("X-Bundle-ID")
 		if bundleID == "" {
 			bundleID = r.Header.Get("CFBundleIdentifier")
 		}
 		if bundleID == "" {
-			// Prova a estrarre dal User-Agent
 			if parts := strings.Split(r.UserAgent(), "CFNetwork"); len(parts) > 1 {
 				if app := strings.TrimSpace(parts[0]); app != "" {
 					bundleID = app
 				}
 			}
 		}
-
 	}
 
-	// Step 2: Hijack the connection
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
 		logEntry.StatusCode = http.StatusInternalServerError
@@ -249,7 +242,6 @@ func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer clientConn.Close()
 
-	// Step 3: Generate certificate for host
 	cert, err := p.certManager.GenerateCertificate(r.Host)
 	if err != nil {
 		logEntry.StatusCode = http.StatusInternalServerError
@@ -258,7 +250,6 @@ func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 4: Send 200 OK to client
 	_, err = clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
 	if err != nil {
 		logEntry.StatusCode = http.StatusInternalServerError
@@ -266,19 +257,19 @@ func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 5: Start TLS server for client
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{*cert},
+		GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+			// Rende più robusto il supporto SNI per i browser
+			return p.certManager.GenerateCertificate(hello.ServerName)
+		},
 	}
 	tlsConn := tls.Server(clientConn, tlsConfig)
 	defer tlsConn.Close()
 
-	// Step 6: Create a buffered reader for the TLS connection
 	reader := bufio.NewReader(tlsConn)
 
-	// Step 7: Read and handle HTTPS requests
 	for {
-		// Read the request
 		req, err := http.ReadRequest(reader)
 		if err != nil {
 			if err != io.EOF {
@@ -287,7 +278,6 @@ func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 
-		// Create new log entry for this request
 		reqLog := RequestLog{
 			Timestamp:       time.Now(),
 			Method:          req.Method,
@@ -299,16 +289,12 @@ func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 			UserAgent:       req.UserAgent(),
 		}
 
-		// Capture request headers
 		for k, v := range req.Header {
 			reqLog.RequestHeaders[k] = strings.Join(v, ", ")
 		}
 
-		// Always try to capture request body
 		if req.Body != nil {
 			var bodyReader io.Reader = req.Body
-
-			// Check if request is gzipped
 			if req.Header.Get("Content-Encoding") == "gzip" {
 				gzReader, err := gzip.NewReader(req.Body)
 				if err == nil {
@@ -316,36 +302,51 @@ func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 					defer gzReader.Close()
 				}
 			}
-
-			// Read the body (decompressed if gzipped)
 			body, err := io.ReadAll(bodyReader)
 			if err == nil && len(body) > 0 {
 				reqLog.RequestBody = string(body)
-				// Restore body for forwarding
 				req.Body = io.NopCloser(bytes.NewBuffer(body))
 			}
 		}
 
-		// Create transport for the outgoing request
+		// 🔥 MATCH MOCK PRIMA DI INOLTRARE LA RICHIESTA
+		if mockResp, _ := p.mockManager.Match(req.Method, r.Host, req.URL.Path); mockResp != nil {
+			if mockResp.LatencyMs > 0 {
+				time.Sleep(time.Duration(mockResp.LatencyMs) * time.Millisecond)
+			}
+			reqLog.StatusCode = mockResp.StatusCode
+			reqLog.ResponseHeaders = map[string]string{"X-Mock-Response": "true"}
+			reqLog.ResponseBody = mockResp.Response
+			reqLog.Completed = time.Now()
+			reqLog.ResponseTime = reqLog.Completed.Sub(reqLog.Timestamp)
+
+			// Usa una risposta HTTP formattata correttamente
+			resp := fmt.Sprintf("HTTP/1.1 %d %s\r\nContent-Length: %d\r\nContent-Type: %s\r\nX-Mock-Response: true\r\n\r\n%s",
+				mockResp.StatusCode,
+				http.StatusText(mockResp.StatusCode),
+				len(mockResp.Response),
+				mockResp.ContentType, // o "application/json"
+				mockResp.Response,
+			)
+			log.Println(resp)
+			tlsConn.Write([]byte(resp))
+			p.addLog(reqLog)
+			continue
+		}
+
 		transport := &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		}
-
-		// Create a new client with our transport
 		client := &http.Client{Transport: transport}
 
-		// Create a new request to forward
 		outReq, err := http.NewRequest(req.Method, reqLog.URL, req.Body)
 		if err != nil {
 			reqLog.StatusCode = http.StatusBadGateway
 			p.addLog(reqLog)
 			continue
 		}
-
-		// Copy headers to the new request
 		outReq.Header = req.Header
 
-		// Send the request
 		resp, err := client.Do(outReq)
 		if err != nil {
 			reqLog.StatusCode = http.StatusBadGateway
@@ -353,17 +354,13 @@ func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		// Capture response details
 		reqLog.StatusCode = resp.StatusCode
 		for k, v := range resp.Header {
 			reqLog.ResponseHeaders[k] = strings.Join(v, ", ")
 		}
 
-		// Always try to capture response body
 		if resp.Body != nil {
 			var bodyReader io.Reader = resp.Body
-
-			// Check if response is gzipped
 			if resp.Header.Get("Content-Encoding") == "gzip" {
 				gzReader, err := gzip.NewReader(resp.Body)
 				if err == nil {
@@ -371,23 +368,18 @@ func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 					defer gzReader.Close()
 				}
 			}
-
-			// Read the body (decompressed if gzipped)
 			body, err := io.ReadAll(bodyReader)
 			if err == nil && len(body) > 0 {
 				reqLog.ResponseBody = string(body)
-				// Restore body for forwarding
 				resp.Body = io.NopCloser(bytes.NewBuffer(body))
 			}
 		}
 
-		// Write response back to client
 		if err := resp.Write(tlsConn); err != nil {
 			log.Printf("Error writing response: %v", err)
 			break
 		}
 
-		// Complete the log
 		reqLog.Completed = time.Now()
 		reqLog.ResponseTime = reqLog.Completed.Sub(reqLog.Timestamp)
 		p.addLog(reqLog)

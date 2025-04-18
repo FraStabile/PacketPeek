@@ -80,7 +80,7 @@ class AuthorizeAppViewModel: ObservableObject {
                     return
                 }
 
-                guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+                guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 || httpResponse.statusCode == 201 else {
                     self.errorMessage = "Authorization failed."
                     return
                 }

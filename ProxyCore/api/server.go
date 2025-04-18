@@ -17,12 +17,14 @@ type APIServer struct {
 	upgrader    websocket.Upgrader
 	clients     map[*websocket.Conn]struct{}
 	mu          sync.RWMutex
+	mockManager *proxy.MockManager
 }
 
 func NewAPIServer(proxyServer *proxy.ProxyServer) *APIServer {
 	return &APIServer{
 		proxyServer: proxyServer,
 		appsManager: proxy.NewMonitoredAppsManager("monitored_apps.json"),
+		mockManager: proxy.NewMockManager("mocks.json"),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				return true // Allow all origins for development
@@ -40,8 +42,54 @@ func (s *APIServer) Start(addr string) error {
 	http.HandleFunc("/cert/macos", s.handleMacOSCert)
 	http.HandleFunc("/api/apps", s.handleApps)
 	http.HandleFunc("/api/apps/", s.handleAppOperation)
-	
+	http.HandleFunc("/api/mocks", s.handleMocks)     // GET e POST
+	http.HandleFunc("/api/mocks/", s.handleMockByID) // attenzione allo slash finale!
+
+	s.serveStaticFiles()
 	return http.ListenAndServe(addr, nil)
+}
+
+func (s *APIServer) handleMockByID(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/api/mocks/")
+	if id == "" {
+		http.Error(w, "Missing ID", http.StatusBadRequest)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		err := s.mockManager.DeleteMockByID(id)
+		if err != nil {
+			http.Error(w, "Mock not found", http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *APIServer) handleMocks(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		mocks := s.mockManager.ListMocks()
+		json.NewEncoder(w).Encode(mocks)
+	case http.MethodPost:
+		var mock proxy.MockResponse
+		if err := json.NewDecoder(r.Body).Decode(&mock); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+		error := s.mockManager.AddMock(mock)
+		if error == nil {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 func (s *APIServer) handleGetLogs(w http.ResponseWriter, r *http.Request) {
@@ -76,55 +124,122 @@ func (s *APIServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 }
+func (s *APIServer) serveStaticFiles() {
+	// Servi i file statici dalla cartella corrente
+	fs := http.FileServer(http.Dir("."))
+	http.Handle("../static/", http.StripPrefix("/static/", fs))
+}
 
 func (s *APIServer) handleWelcome(w http.ResponseWriter, r *http.Request) {
 	html := `
 <!DOCTYPE html>
-<html>
+<html lang="it">
 <head>
-    <title>ProxyCore - Welcome</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PacketPeek - Success</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            max-width: 800px;
+            background-color: #f7f7f7;
+            color: #333;
+            max-width: 900px;
             margin: 40px auto;
             padding: 0 20px;
             line-height: 1.6;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+            border-radius: 8px;
+        }
+
+        h1 {
+            font-size: 36px;
+            margin-bottom: 15px;
+            text-align: center;
             color: #333;
         }
+
         .success {
-            color: #2ecc71;
+            color: #27ae60;
             font-size: 24px;
             margin-bottom: 30px;
+            text-align: center;
+            font-weight: bold;
         }
+
+        p {
+            font-size: 18px;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
         .links {
-            margin-top: 30px;
+            margin-top: 40px;
+            text-align: center;
+            padding-bottom: 40px;
+			spa
         }
+
         .links a {
             display: inline-block;
             margin-right: 20px;
-            padding: 10px 20px;
+            padding: 12px 25px;
             background-color: #3498db;
             color: white;
             text-decoration: none;
-            border-radius: 5px;
-            transition: background-color 0.3s;
+            border-radius: 30px;
+            font-size: 16px;
+            font-weight: 500;
+            transition: all 0.3s;
+			margin-bottom: 20px;
         }
+
         .links a:hover {
             background-color: #2980b9;
+        }
+
+        .footer {
+            margin-top: 50px;
+            text-align: center;
+            font-size: 14px;
+            color: rgba(0, 0, 0, 0.6);
+        }
+
+        .footer a {
+            color: #3498db;
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .footer a:hover {
+            text-decoration: underline;
+        }
+
+        .icon-container {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .icon-container img {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            border: 2px solid #3498db;
+            padding: 10px;
+            background-color: white;
         }
     </style>
 </head>
 <body>
-    <h1>ProxyCore</h1>
+    <h1>PacketPeek - Proxy</h1>
     <div class="success">✅ Sei connesso al Proxy</div>
-    <p>Per utilizzare il proxy HTTPS, devi installare il certificato CA sul tuo dispositivo:</p>
+    <p>Per utilizzare PacketPeek, devi installare il certificato CA sul tuo dispositivo:</p>
     <div class="links">
         <a href="/cert/ios">Scarica certificato per iOS Simulator</a>
-        <a href="/cert/macos">Scarica certificato per MacOS</a>
+        <a href="/cert/macos">Scarica certificato per macOS</a>
     </div>
 </body>
-</html>`
+</html>
+`
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(html))
@@ -160,7 +275,7 @@ func (s *APIServer) handleApps(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		w.WriteHeader(http.StatusCreated)
+		w.WriteHeader(http.StatusOK)
 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
