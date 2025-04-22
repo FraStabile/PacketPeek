@@ -7,6 +7,7 @@
 
 import Combine
 import Foundation
+import SwiftDependency
 class MockModalEditViewModel: ObservableObject {
     @Published var isPresented: Bool = false
     @Published var log: ProxyLog = ProxyLog()
@@ -36,6 +37,7 @@ class MockModalEditViewModel: ObservableObject {
     }
     """
 
+    @InjectProps private var repo: MocksAPI
     @Published var statusCode: String = ""
     
     func dismiss() {
@@ -56,11 +58,7 @@ class MockModalEditViewModel: ObservableObject {
         }
         let requestData = MockItemRequest(method: log.method, host: host, path: log.url.path, isRegex: false, statusCode: Int(statusCode) ?? 0, latencyMS: Int(statusCode) ?? 0, response: response.trim(), contentType: "application/json", isActive: true)
         do {
-            var urlRequest = URLRequest(url: URL(string: "http://localhost:8081/api/mocks")!)
-            urlRequest.httpBody = try JSONEncoder().encode(requestData)
-            urlRequest.httpMethod = "POST"
-            _ = try await URLSession.shared.data(for: urlRequest)
-            print("Successo")
+            try await repo.updateMock(requestData)
         } catch {
             print("Error")
         }

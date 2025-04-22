@@ -11,6 +11,7 @@
 		1338851C2DAF9FCA009E8B0C /* Icon.png in Resources */ = {isa = PBXBuildFile; fileRef = 1338851B2DAF9FCA009E8B0C /* Icon.png */; };
 		133885A62DB135B7009E8B0C /* Papyrus in Frameworks */ = {isa = PBXBuildFile; productRef = 133885A52DB135B7009E8B0C /* Papyrus */; };
 		133885FF2DB2AA49009E8B0C /* LICENCE.MD in Sources */ = {isa = PBXBuildFile; fileRef = 133885FE2DB2AA45009E8B0C /* LICENCE.MD */; };
+		13AE71782DB7918A0018EB93 /* SwiftDependency in Frameworks */ = {isa = PBXBuildFile; productRef = 13AE71772DB7918A0018EB93 /* SwiftDependency */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -38,22 +39,9 @@
 		FF34EF442D95CC7B0029BED2 /* ProxyAppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ProxyAppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
-/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		1322E6AE2DA7F46800650171 /* Exceptions for "ProxyApp" folder in "PacketPeek" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Info.plist,
-			);
-			target = FF34EF262D95CC790029BED2 /* PacketPeek */;
-		};
-/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
-
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		1322E6A52DA7F46800650171 /* ProxyApp */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				1322E6AE2DA7F46800650171 /* Exceptions for "ProxyApp" folder in "PacketPeek" target */,
-			);
 			path = ProxyApp;
 			sourceTree = "<group>";
 		};
@@ -74,6 +62,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				13AE71782DB7918A0018EB93 /* SwiftDependency in Frameworks */,
 				131F28B12DA9729900FB0D3B /* DGCharts in Frameworks */,
 				133885A62DB135B7009E8B0C /* Papyrus in Frameworks */,
 			);
@@ -140,6 +129,7 @@
 			packageProductDependencies = (
 				131F28B02DA9729900FB0D3B /* DGCharts */,
 				133885A52DB135B7009E8B0C /* Papyrus */,
+				13AE71772DB7918A0018EB93 /* SwiftDependency */,
 			);
 			productName = ProxyApp;
 			productReference = FF34EF272D95CC790029BED2 /* PacketPeek.app */;
@@ -226,6 +216,7 @@
 			packageReferences = (
 				131F28AF2DA9729900FB0D3B /* XCRemoteSwiftPackageReference "Charts" */,
 				133885A42DB135B7009E8B0C /* XCRemoteSwiftPackageReference "papyrus" */,
+				13AE71762DB7918A0018EB93 /* XCRemoteSwiftPackageReference "SwiftDependency" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = FF34EF282D95CC790029BED2 /* Products */;
@@ -611,6 +602,14 @@
 				minimumVersion = 0.1.0;
 			};
 		};
+		13AE71762DB7918A0018EB93 /* XCRemoteSwiftPackageReference "SwiftDependency" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/FraStabile/SwiftDependency.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.0.1;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -623,6 +622,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 133885A42DB135B7009E8B0C /* XCRemoteSwiftPackageReference "papyrus" */;
 			productName = Papyrus;
+		};
+		13AE71772DB7918A0018EB93 /* SwiftDependency */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 13AE71762DB7918A0018EB93 /* XCRemoteSwiftPackageReference "SwiftDependency" */;
+			productName = SwiftDependency;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

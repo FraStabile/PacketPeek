@@ -15,7 +15,9 @@ struct ProxyAppApp: App {
     @StateObject var mockEditorViewModel: MockModalEditViewModel = MockModalEditViewModel()
     @StateObject var modalRouter = ModalRouter()
     var mainProvider: MainProvider = MainProvider()
+    private let diManager = DependecyManager()
     var body: some Scene {
+
         WindowGroup {
             ContentView(proxyCore: proxyCore)
                 .sheet(item: $modalRouter.activeModal) { modal in
@@ -35,12 +37,14 @@ struct ProxyAppApp: App {
                 .environmentObject(mockEditorViewModel)
                 .environmentObject(modalRouter)
                 .environmentObject(MainProvider())
+                
         }
         .commands {
             CommandMenu("Development") {
                 Button("Authorize Apps") {
-                    authViewModel.fetchAuthorizedApps()
-                    modalRouter.activeModal = .authorizeApps
+                    Task {
+                        modalRouter.activeModal = .authorizeApps
+                    }
                 }
                 .keyboardShortcut("A", modifiers: [.command, .shift])
                 Button("Mock Manager") {

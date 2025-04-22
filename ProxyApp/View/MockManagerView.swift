@@ -97,7 +97,6 @@ struct MockManagerView: View {
         .frame(minWidth: 800)
         .onAppear {
             Task {
-                viewModel.setupRepo(repo: provider.mocksService())
                 await viewModel.fetchMocks()
             }
         }

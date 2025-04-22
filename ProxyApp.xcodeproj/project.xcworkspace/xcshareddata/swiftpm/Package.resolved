@@ -1,0 +1,51 @@
+{
+  "originHash" : "26262b0937f2609afc5846f393ea5c752f1582b3b0db02e5fe3ad798f2e7f6d8",
+  "pins" : [
+    {
+      "identity" : "alamofire",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Alamofire/Alamofire.git",
+      "state" : {
+        "revision" : "513364f870f6bfc468f9d2ff0a95caccc10044c5",
+        "version" : "5.10.2"
+      }
+    },
+    {
+      "identity" : "charts",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/danielgindi/Charts.git",
+      "state" : {
+        "revision" : "dd9c72e3d7e751e769971092a6bd72d39198ae63",
+        "version" : "5.1.0"
+      }
+    },
+    {
+      "identity" : "papyrus",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/joshuawright11/papyrus.git",
+      "state" : {
+        "revision" : "0a424d90f7a31b40e3b850a58062bb3aa701323f",
+        "version" : "0.6.16"
+      }
+    },
+    {
+      "identity" : "swift-syntax",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-syntax",
+      "state" : {
+        "revision" : "2bc86522d115234d1f588efe2bcb4ce4be8f8b82",
+        "version" : "510.0.3"
+      }
+    },
+    {
+      "identity" : "swiftdependency",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/FraStabile/SwiftDependency.git",
+      "state" : {
+        "revision" : "dc1129735de60bc47f3fa1b6721244109214fa30",
+        "version" : "1.0.1"
+      }
+    }
+  ],
+  "version" : 3
+}

@@ -9,6 +9,7 @@ import SwiftUI
 
 struct AuthAppView: View {
     @EnvironmentObject var viewModel: AuthorizeAppViewModel
+    @EnvironmentObject var modalRouter: ModalRouter
     private var filterApp: [AuthorizedApp] {
         viewModel.authorizedApps.filter({$0.decrypt_traffic})
     }
@@ -31,7 +32,9 @@ struct AuthAppView: View {
                 }
                 TableColumn("Actions") { app in
                     Button(role: .destructive) {
-                        viewModel.disableDecryption(for: app)
+                        Task {
+                            await viewModel.disableDecryption(for: app)
+                        }
                     } label: {
                         Label("Disable", systemImage: "trash")
                     }
@@ -47,7 +50,7 @@ struct AuthAppView: View {
             
             HStack {
                 Button("Close") {
-                    viewModel.showAuthorizationSheet = false
+                    modalRouter.activeModal = nil
                 }
                 
                 Spacer()
@@ -63,6 +66,11 @@ struct AuthAppView: View {
         .frame(width: 600)
         .sheet(isPresented: $viewModel.showAddSheet) {
             AddAppSheet()
+        }
+        .onAppear {
+            Task {
+                await viewModel.fetchAuthorizedApps()
+            }
         }
     }
 }

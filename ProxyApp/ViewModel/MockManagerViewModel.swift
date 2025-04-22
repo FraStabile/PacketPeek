@@ -8,31 +8,28 @@
 import Combine
 import Foundation
 import SwiftUI
-
+import SwiftDependency
 @MainActor
 class MockManagerViewModel: ObservableObject {
     @Published var mocks: [MockItemRequest] = []
     @Published var showAddSheet: Bool = false
     @Published var showEditSheet: Bool = false
     @Published var errorMessage: String?
-    private var mockRepo: MocksAPI?
+    @InjectProps private var repo: MocksAPI
     
-    func setupRepo(repo: MocksAPI) {
-        self.mockRepo = repo
-    }
     func fetchMocks() async {
         do {
-            let response = try await mockRepo?.getMocks()
-            mocks = response ?? []
+            let response = try await repo.getMocks()
+            mocks = response
         } catch {
             errorMessage = error.localizedDescription
         }
     }
     func deleteMock(mock: MockItemRequest) async {
         do {
-            let _ = try await mockRepo?.deleteMock(id: mock.id)
-            let response = try await mockRepo?.getMocks()
-            mocks = response ?? []
+            let _ = try await repo.deleteMock(id: mock.id)
+            let response = try await repo.getMocks()
+            mocks = response
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -42,16 +39,13 @@ class MockManagerViewModel: ObservableObject {
     func toggleMock(mock: MockItemRequest, isActive: Bool) async {
         var updateMock = mock
         updateMock.isActive = isActive
-        var urlRequest = URLRequest(url: URL(string: "http://localhost:8081/api/mocks")!)
         do {
-            urlRequest.httpBody = try JSONEncoder().encode(updateMock)
-            urlRequest.httpMethod = "POST"
-            _ = try await URLSession.shared.data(for: urlRequest)
+            try await repo.updateMock(updateMock)
             if let index = mocks.firstIndex(where: { $0.id == mock.id }) {
                 mocks[index] = updateMock
             }
         } catch {
-            
+            errorMessage = error.localizedDescription
         }
     }
 

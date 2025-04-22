@@ -34,7 +34,9 @@ struct AddAppSheet: View {
                 }
 
                 Button("Authorize") {
-                    viewModel.authorizeApp()
+                    Task {
+                        await viewModel.authorizeApp()
+                    }
                 }
                 .disabled(viewModel.isSubmitting)
             }

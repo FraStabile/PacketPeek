@@ -14,8 +14,16 @@ protocol MocksAPI {
     
     @POST("/api/mocks")
     @Headers(["Content-Type": "application/json"])
-    func updateMock(_ mock: MockItemRequest) async throws
+    func updateMock(_ mock: Body<MockItemRequest>) async throws
     
     @GET("/api/mocks/:id")
     func deleteMock(id: String) async throws
+    
+    @GET("/api/apps")
+    func getApps() async throws -> [AuthorizedApp]
+    
+    
+    @POST("/api/apps")
+    func setApps(_ apps: Body<AuthorizedApp>) async throws
+    
 }
