@@ -11,5 +11,6 @@ class DependecyManager {
     
     init() {
         Container.shared.register(MocksAPI.self, component: MainProvider().mocksService(), lifeCycle: .singleton)
+        Container.shared.register(SettingsManagerProtocol.self, component: SettingsManager(), lifeCycle: .singleton)
     }
 }

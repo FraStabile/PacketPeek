@@ -13,12 +13,14 @@ enum AppModal: Identifiable {
     case mockManager
     case editMock
     case authorizeApps
+    case settings
     var id: String {
         switch self {
         case .tutorial: return "tutorial"
         case .mockManager: return "mockManager"
         case .editMock: return "editMock"
         case .authorizeApps: return "authorizeApps"
+        case .settings: return "settings"
         }
     }
 }
