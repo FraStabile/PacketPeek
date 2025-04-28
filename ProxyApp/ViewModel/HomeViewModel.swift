@@ -7,7 +7,7 @@
 import Combine
 import Foundation
 import AppKit
-final class HomeViewModel: ObservableObject {
+final class HomeViewModel: BaseViewModel {
     @Published var agents: [AgentModel] = []
     
     private var proxyCore: ProxyCore

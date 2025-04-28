@@ -19,9 +19,6 @@ struct ProxyAppApp: App {
 
     private let diManager = DependecyManager()
     var body: some Scene {
-        WindowGroup("Settings", id: "settingsWindow") {
-            MainSettingView()
-        }
         WindowGroup {
             ContentView(proxyCore: proxyCore)
                 .sheet(item: $modalRouter.activeModal) { modal in
@@ -68,6 +65,10 @@ struct ProxyAppApp: App {
                 }
             }
         }
+        WindowGroup("Settings", id: "settingsWindow") {
+            MainSettingView()
+        }
+        
         
     }
 }

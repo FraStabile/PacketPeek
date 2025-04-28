@@ -8,7 +8,7 @@
 import Combine
 import Foundation
 import SwiftDependency
-class MockModalEditViewModel: ObservableObject {
+class MockModalEditViewModel: BaseViewModel {
     @Published var isPresented: Bool = false
     @Published var log: ProxyLog = ProxyLog()
     @Published var latency: String = "0"

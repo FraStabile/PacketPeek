@@ -9,11 +9,12 @@ import SwiftUI
 import SwiftDependency
 struct GeneralSettingView: View {
     @State private var selectedLanguage = "en"
-    @State private var darkMode = false
     @State private var notificationsEnabled = true
     @State private var launchAtLogin = false
     @InjectProps private var settingManager: SettingsManagerProtocol
-    
+    private var viewModel: GeneralSettingViewModel {
+        return GeneralSettingViewModel()
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             Text("Impostazioni Generali")
@@ -29,24 +30,17 @@ struct GeneralSettingView: View {
                 .pickerStyle(SegmentedPickerStyle())
                 .frame(width: 200)
                 .onChange(of: selectedLanguage) {
-                    print(selectedLanguage)
-                    let newSetting = settingManager.getCurrentSettings()
-                    newSetting.general.language = selectedLanguage
-                    settingManager.saveSettings(newSetting)
+                    viewModel.settingLang(selectedLanguage)
+                }
+            }
+            
+            settingRow(title: "Svuota Cache") {
+                Button("Cancel") {
+                    viewModel.clearRuntimeCache()
                 }
             }
 
-            // Tema
-            settingRow(title: "Tema scuro") {
-                Toggle("", isOn: $darkMode)
-                    .toggleStyle(.switch)
-            }
-            .onChange(of: darkMode) {
-                let newSettings = settingManager.getCurrentSettings()
-                let theme: String = darkMode ? "dark" : "light"
-                newSettings.general.theme = theme
-                settingManager.saveSettings(newSettings)
-            }
+            
             
             Spacer()
         }
@@ -54,7 +48,6 @@ struct GeneralSettingView: View {
         .frame(minWidth: 400)
         .background(Color(NSColor.controlBackgroundColor))
         .onAppear {
-            darkMode = settingManager.getCurrentSettings().general.theme == "dark"
             selectedLanguage = settingManager.getCurrentSettings().general.language
         }
     }

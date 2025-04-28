@@ -9,8 +9,8 @@ import Combine
 import Foundation
 import SwiftUI
 import SwiftDependency
-@MainActor
-class MockManagerViewModel: ObservableObject {
+
+class MockManagerViewModel: BaseViewModel {
     @Published var mocks: [MockItemRequest] = []
     @Published var showAddSheet: Bool = false
     @Published var showEditSheet: Bool = false

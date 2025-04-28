@@ -18,16 +18,12 @@ class ProxyCore: ObservableObject {
     @Published var logs: [ProxyLog] = []
     // Path di installazione finale del binario
     private var execURL: URL {
-        FileManager.default
-            .homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/PacketPeek/\(executableName)")
+        FileManagerUrls.executableDirectory
     }
     
     // Directory di lavoro del processo (dove può scrivere file)
     private var workingDirectory: URL {
-        FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("PacketPeekRuntime")
+        FileManagerUrls.workingDirectory
     }
     
     init() {

@@ -18,10 +18,8 @@ class SettingsModel: Codable, ObservableObject {
 }
 
 class GeneralSettingsModel: Codable {
-    var theme: String
     var language: String
     init(theme: String, language: String) {
-        self.theme = theme
         self.language = language
     }
 }

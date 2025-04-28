@@ -22,7 +22,7 @@ struct MainSettingView: View {
         }
         .frame(minWidth: 700, minHeight: 500)
         .onAppear {
-            settingsManager.loadSettings()
+            _ = settingsManager.loadSettings()
         }
     }
 

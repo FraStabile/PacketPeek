@@ -8,14 +8,8 @@
 import Combine
 import Foundation
 import SwiftDependency
-struct AuthorizedApp: Identifiable, Codable {
-    var id: String { bundle_id }
-    let bundle_id: String
-    let name: String
-    let decrypt_traffic: Bool
-}
 
-class AuthorizeAppViewModel: ObservableObject {
+class AuthorizeAppViewModel: BaseViewModel {
     @Published var showAuthorizationSheet = false
     @Published var showAddSheet = false
 

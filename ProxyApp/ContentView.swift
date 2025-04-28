@@ -71,7 +71,7 @@ struct ContentView: View {
                             Text("Proxy Offline")
                                 .font(.caption)
                                 .foregroundColor(.gray)
-                            Text("Click ▶ to start")
+                            Text("ClickStart")
                                 .font(.caption2)
                                 .foregroundColor(.gray)
                         }

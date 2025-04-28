@@ -8,13 +8,12 @@
 
 import Foundation
 class SettingsManager: SettingsManagerProtocol {
+    var onSettingsChanged: (() -> Void)? = { }
+    
     var settingModel: SettingsModel?
     private var settingsFileURL: URL {
-            FileManager.default
-                .urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-                .appendingPathComponent("PacketPeekRuntime")
-                .appendingPathComponent("settings.json")
-        }
+        FileManagerUrls.settingsFileURL
+    }
     
     
         init() {
