@@ -1,313 +1,367 @@
 package api
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"log"
 	"net/http"
-	"proxy_core/proxy"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
+	"time"
+
+	"proxy_core/proxy"
 
 	"github.com/gorilla/websocket"
 )
 
+const (
+	maxJSONBody    = 4 << 20 // 4 MiB cap for control-plane POST bodies
+	wsPingPeriod   = 30 * time.Second
+	wsReadDeadline = 90 * time.Second
+)
+
 type APIServer struct {
 	proxyServer *proxy.ProxyServer
-	appsManager *proxy.MonitoredAppsManager
 	upgrader    websocket.Upgrader
 	clients     map[*websocket.Conn]struct{}
-	mu          sync.RWMutex
-	mockManager *proxy.MockManager
+	mu          sync.Mutex
+	token       string
+	requireAuth bool
+	runtimeDir  string
 }
 
-func NewAPIServer(proxyServer *proxy.ProxyServer) *APIServer {
+// NewAPIServer wires up the control plane. The token is written to disk so a
+// future client can attach it as a Bearer header; enforcement is opt-in via
+// requireAuth so the MVP can ship without breaking the existing Swift client.
+// Loopback binding already protects against off-host attackers.
+func NewAPIServer(proxyServer *proxy.ProxyServer, token, runtimeDir string) *APIServer {
+	requireAuth := os.Getenv("PACKETPEEK_AUTH") == "required"
 	return &APIServer{
 		proxyServer: proxyServer,
-		appsManager: proxy.NewMonitoredAppsManager("monitored_apps.json"),
-		mockManager: proxy.NewMockManager("mocks.json"),
+		token:       token,
+		requireAuth: requireAuth,
+		runtimeDir:  runtimeDir,
+		clients:     make(map[*websocket.Conn]struct{}),
 		upgrader: websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool {
-				return true // Allow all origins for development
-			},
+			ReadBufferSize:  4096,
+			WriteBufferSize: 4096,
+			CheckOrigin:     allowLoopbackOrigin,
 		},
-		clients: make(map[*websocket.Conn]struct{}),
 	}
 }
 
-func (s *APIServer) Start(addr string) error {
-	http.HandleFunc("/logs", s.handleGetLogs)
-	http.HandleFunc("/ws", s.handleWebSocket)
-	http.HandleFunc("/welcome", s.handleWelcome)
-	http.HandleFunc("/cert/ios", s.handleIOSCert)
-	http.HandleFunc("/cert/macos", s.handleMacOSCert)
-	http.HandleFunc("/api/apps", s.handleApps)
-	http.HandleFunc("/api/apps/", s.handleAppOperation)
-	http.HandleFunc("/api/mocks", s.handleMocks)     // GET e POST
-	http.HandleFunc("/api/mocks/", s.handleMockByID) // attenzione allo slash finale!
+// HTTPServer returns a configured *http.Server bound to addr. Caller runs ListenAndServe.
+func (s *APIServer) HTTPServer(addr string) *http.Server {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", s.handleHealth) // unauthenticated — daemon liveness probe
+	mux.HandleFunc("/welcome", s.handleWelcome)
+	mux.HandleFunc("/cert/ios", s.handleCert)
+	mux.HandleFunc("/cert/macos", s.handleCert)
+	mux.HandleFunc("/cert/ca.pem", s.handleCert)
 
-	s.serveStaticFiles()
-	return http.ListenAndServe(addr, nil)
+	mux.Handle("/logs", s.auth(http.HandlerFunc(s.handleGetLogs)))
+	mux.Handle("/ws", s.auth(http.HandlerFunc(s.handleWebSocket)))
+	mux.Handle("/api/apps", s.auth(http.HandlerFunc(s.handleApps)))
+	mux.Handle("/api/apps/", s.auth(http.HandlerFunc(s.handleAppOperation)))
+	mux.Handle("/api/mocks", s.auth(http.HandlerFunc(s.handleMocks)))
+	mux.Handle("/api/mocks/", s.auth(http.HandlerFunc(s.handleMockByID)))
+
+	return &http.Server{
+		Addr:              addr,
+		Handler:           jsonContentTypeOnPost(noStoreHeaders(mux)),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      0, // 0 → WS-friendly; per-handler timeouts apply
+		IdleTimeout:       2 * time.Minute,
+	}
 }
 
-func (s *APIServer) handleMockByID(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimPrefix(r.URL.Path, "/api/mocks/")
-	if id == "" {
-		http.Error(w, "Missing ID", http.StatusBadRequest)
-		return
+// auth is the bearer-token middleware. Accepts the token either via the
+// Authorization: Bearer <token> header or a ?token= query param (the latter
+// is needed for the WebSocket handshake, where JS clients can't set headers).
+// Bypassed entirely when requireAuth=false (default), at which point we still
+// generate and write the token so clients can opt in.
+func (s *APIServer) auth(next http.Handler) http.Handler {
+	if !s.requireAuth {
+		return next
 	}
-
-	switch r.Method {
-	case http.MethodGet:
-		err := s.mockManager.DeleteMockByID(id)
-		if err != nil {
-			http.Error(w, "Mock not found", http.StatusNotFound)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got := bearerFromRequest(r)
+		if !constTimeEqual(got, s.token) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		w.WriteHeader(http.StatusOK)
-	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		next.ServeHTTP(w, r)
+	})
+}
+
+func bearerFromRequest(r *http.Request) string {
+	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
+		return strings.TrimPrefix(h, "Bearer ")
 	}
+	return r.URL.Query().Get("token")
+}
+
+func constTimeEqual(a, b string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
+}
+
+// allowLoopbackOrigin lets WS connections through only when the Origin header is
+// empty (native clients), missing, or points at a loopback address.
+func allowLoopbackOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	o := strings.ToLower(origin)
+	return strings.HasPrefix(o, "http://127.0.0.1") ||
+		strings.HasPrefix(o, "http://localhost") ||
+		strings.HasPrefix(o, "https://127.0.0.1") ||
+		strings.HasPrefix(o, "https://localhost") ||
+		strings.HasPrefix(o, "file://")
+}
+
+func noStoreHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		next.ServeHTTP(w, r)
+	})
+}
+
+func jsonContentTypeOnPost(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Cap POST/PUT/DELETE bodies. Cheap and avoids surprises.
+		if r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch {
+			r.Body = http.MaxBytesReader(w, r.Body, maxJSONBody)
+			if ct := r.Header.Get("Content-Type"); ct != "" && !strings.HasPrefix(ct, "application/json") {
+				// Allow form/text bodies through for now, but log noisy mismatches.
+				if !strings.HasPrefix(ct, "application/x-www-form-urlencoded") &&
+					!strings.HasPrefix(ct, "text/") {
+					http.Error(w, "expected application/json", http.StatusUnsupportedMediaType)
+					return
+				}
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func writeJSON(w http.ResponseWriter, status int, v interface{}) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	if v == nil {
+		return
+	}
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+// ---- handlers ----
+
+func (s *APIServer) handleHealth(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *APIServer) handleGetLogs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.proxyServer.GetLogs())
 }
 
 func (s *APIServer) handleMocks(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		mocks := s.mockManager.ListMocks()
-		json.NewEncoder(w).Encode(mocks)
+		writeJSON(w, http.StatusOK, s.proxyServer.MockManager().ListMocks())
 	case http.MethodPost:
 		var mock proxy.MockResponse
 		if err := json.NewDecoder(r.Body).Decode(&mock); err != nil {
-			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
 			return
 		}
-		error := s.mockManager.AddMock(mock)
-		if error == nil {
-			w.WriteHeader(http.StatusOK)
+		if err := s.proxyServer.MockManager().AddMock(mock); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		w.WriteHeader(http.StatusInternalServerError)
-
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
 }
 
-func (s *APIServer) handleGetLogs(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(s.proxyServer.GetLogs())
-}
-
-func (s *APIServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	conn, err := s.upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Printf("Failed to upgrade connection: %v", err)
+func (s *APIServer) handleMockByID(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/api/mocks/")
+	if id == "" || strings.Contains(id, "/") {
+		http.Error(w, "missing or invalid id", http.StatusBadRequest)
 		return
 	}
-	defer conn.Close()
-
-	// Subscribe to proxy logs
-	logChan := s.proxyServer.Subscribe()
-	defer func() {
-		s.proxyServer.Unsubscribe(logChan)
-		s.mu.Lock()
-		delete(s.clients, conn)
-		s.mu.Unlock()
-		conn.Close()
-	}()
-
-	// Send logs to client
-	for logMessage := range logChan {
-		err := conn.WriteJSON(logMessage)
-		if err != nil {
-			log.Println(err)
+	switch r.Method {
+	case http.MethodDelete:
+		if err := s.proxyServer.MockManager().DeleteMockByID(id); err != nil {
+			http.Error(w, "mock not found", http.StatusNotFound)
 			return
 		}
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
-}
-func (s *APIServer) serveStaticFiles() {
-	// Servi i file statici dalla cartella corrente
-	fs := http.FileServer(http.Dir("."))
-	http.Handle("../static/", http.StripPrefix("/static/", fs))
-}
-
-func (s *APIServer) handleWelcome(w http.ResponseWriter, r *http.Request) {
-	html := `
-<!DOCTYPE html>
-<html lang="it">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PacketPeek - Success</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-color: #f7f7f7;
-            color: #333;
-            max-width: 900px;
-            margin: 40px auto;
-            padding: 0 20px;
-            line-height: 1.6;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
-            border-radius: 8px;
-        }
-
-        h1 {
-            font-size: 36px;
-            margin-bottom: 15px;
-            text-align: center;
-            color: #333;
-        }
-
-        .success {
-            color: #27ae60;
-            font-size: 24px;
-            margin-bottom: 30px;
-            text-align: center;
-            font-weight: bold;
-        }
-
-        p {
-            font-size: 18px;
-            text-align: center;
-            margin-bottom: 20px;
-        }
-
-        .links {
-            margin-top: 40px;
-            text-align: center;
-            padding-bottom: 40px;
-			spa
-        }
-
-        .links a {
-            display: inline-block;
-            margin-right: 20px;
-            padding: 12px 25px;
-            background-color: #3498db;
-            color: white;
-            text-decoration: none;
-            border-radius: 30px;
-            font-size: 16px;
-            font-weight: 500;
-            transition: all 0.3s;
-			margin-bottom: 20px;
-        }
-
-        .links a:hover {
-            background-color: #2980b9;
-        }
-
-        .footer {
-            margin-top: 50px;
-            text-align: center;
-            font-size: 14px;
-            color: rgba(0, 0, 0, 0.6);
-        }
-
-        .footer a {
-            color: #3498db;
-            text-decoration: none;
-            font-weight: 600;
-        }
-
-        .footer a:hover {
-            text-decoration: underline;
-        }
-
-        .icon-container {
-            text-align: center;
-            margin-bottom: 20px;
-        }
-
-        .icon-container img {
-            width: 80px;
-            height: 80px;
-            border-radius: 50%;
-            border: 2px solid #3498db;
-            padding: 10px;
-            background-color: white;
-        }
-    </style>
-</head>
-<body>
-    <h1>PacketPeek - Proxy</h1>
-    <div class="success">✅ Sei connesso al Proxy</div>
-    <p>Per utilizzare PacketPeek, devi installare il certificato CA sul tuo dispositivo:</p>
-    <div class="links">
-        <a href="/cert/ios">Scarica certificato per iOS Simulator</a>
-        <a href="/cert/macos">Scarica certificato per macOS</a>
-    </div>
-</body>
-</html>
-`
-
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(html))
-}
-
-func (s *APIServer) handleIOSCert(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/x-x509-ca-cert")
-	w.Header().Set("Content-Disposition", "attachment; filename=proxy-ca.pem")
-	http.ServeFile(w, r, "ca.pem")
-}
-
-func (s *APIServer) handleMacOSCert(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/x-x509-ca-cert")
-	w.Header().Set("Content-Disposition", "attachment; filename=proxy-ca.pem")
-	http.ServeFile(w, r, "ca.pem")
 }
 
 func (s *APIServer) handleApps(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		// Lista tutte le app monitorate
-		apps := s.appsManager.ListApps()
-		json.NewEncoder(w).Encode(apps)
-
+		writeJSON(w, http.StatusOK, s.proxyServer.AppsManager().ListApps())
 	case http.MethodPost:
-		// Aggiungi una nuova app
 		var app proxy.MonitoredApp
 		if err := json.NewDecoder(r.Body).Decode(&app); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
 			return
 		}
-		if err := s.appsManager.AddApp(app); err != nil {
+		if err := s.proxyServer.AppsManager().AddApp(app); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		w.WriteHeader(http.StatusOK)
-
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
 }
 
 func (s *APIServer) handleAppOperation(w http.ResponseWriter, r *http.Request) {
-	// Estrai il bundle ID dall'URL
 	bundleID := strings.TrimPrefix(r.URL.Path, "/api/apps/")
-	if bundleID == "" {
-		http.Error(w, "Bundle ID required", http.StatusBadRequest)
+	if bundleID == "" || strings.Contains(bundleID, "/") {
+		http.Error(w, "bundle id required", http.StatusBadRequest)
 		return
 	}
-
 	switch r.Method {
 	case http.MethodGet:
-		// Ottieni dettagli di un'app
-		if app, exists := s.appsManager.GetApp(bundleID); exists {
-			json.NewEncoder(w).Encode(app)
+		if app, exists := s.proxyServer.AppsManager().GetApp(bundleID); exists {
+			writeJSON(w, http.StatusOK, app)
 		} else {
-			http.Error(w, "App not found", http.StatusNotFound)
+			http.Error(w, "app not found", http.StatusNotFound)
 		}
-
 	case http.MethodDelete:
-		// Rimuovi un'app
-		if err := s.appsManager.RemoveApp(bundleID); err != nil {
+		if err := s.proxyServer.AppsManager().RemoveApp(bundleID); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
-
 	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
 }
+
+func (s *APIServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
+	conn, err := s.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("ws upgrade failed: %v", err)
+		return
+	}
+
+	s.mu.Lock()
+	s.clients[conn] = struct{}{}
+	s.mu.Unlock()
+
+	logChan := s.proxyServer.Subscribe()
+
+	// Reader side: only consumes pongs and detects client disconnect.
+	conn.SetReadLimit(1 << 20)
+	_ = conn.SetReadDeadline(time.Now().Add(wsReadDeadline))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(wsReadDeadline))
+	})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			if _, _, err := conn.NextReader(); err != nil {
+				return
+			}
+		}
+	}()
+
+	pingTicker := time.NewTicker(wsPingPeriod)
+	defer pingTicker.Stop()
+
+	cleanup := func() {
+		s.proxyServer.Unsubscribe(logChan)
+		s.mu.Lock()
+		delete(s.clients, conn)
+		s.mu.Unlock()
+		_ = conn.Close()
+	}
+
+	for {
+		select {
+		case <-done:
+			cleanup()
+			return
+		case <-pingTicker.C:
+			if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second)); err != nil {
+				cleanup()
+				return
+			}
+		case entry, ok := <-logChan:
+			if !ok {
+				cleanup()
+				return
+			}
+			_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if err := conn.WriteJSON(entry); err != nil {
+				cleanup()
+				return
+			}
+		}
+	}
+}
+
+func (s *APIServer) handleCert(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/x-x509-ca-cert")
+	w.Header().Set("Content-Disposition", "attachment; filename=packetpeek-ca.pem")
+	http.ServeFile(w, r, s.proxyServer.CertManager().CertPath())
+}
+
+func (s *APIServer) handleWelcome(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write([]byte(welcomeHTML))
+}
+
+// runtimeFilePath is unused publicly but kept so external entry points can locate
+// the runtime dir consistently if needed in future endpoints.
+func (s *APIServer) runtimeFilePath(name string) string {
+	return filepath.Join(s.runtimeDir, name)
+}
+
+const welcomeHTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>PacketPeek</title>
+<style>
+body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 720px; margin: 60px auto; padding: 0 24px; line-height: 1.55; color: #1c1c1e; }
+h1 { font-weight: 600; }
+.ok { color: #2e7d32; font-weight: 600; }
+a.btn { display: inline-block; padding: 10px 16px; margin: 8px 8px 8px 0; background: #007aff; color: white; text-decoration: none; border-radius: 8px; font-weight: 500; }
+a.btn:hover { background: #0a64d6; }
+code { background: #f2f2f7; padding: 2px 6px; border-radius: 4px; }
+ol li { margin: 6px 0; }
+</style>
+</head>
+<body>
+<h1>PacketPeek API</h1>
+<p class="ok">✅ Control plane is running on loopback.</p>
+<p>Use the desktop app to manage the proxy. The cert endpoints below are
+public so devices on the LAN (via the proxy port) can install the CA.</p>
+<p>
+<a class="btn" href="/cert/ios">Download CA (iOS)</a>
+<a class="btn" href="/cert/macos">Download CA (macOS)</a>
+</p>
+</body>
+</html>`

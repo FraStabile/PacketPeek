@@ -1,0 +1,14 @@
+[
+  {
+    "id": "328cf88ca4c8f1d7180323b56aa60337068a88a4",
+    "method": "GET",
+    "host": "rickandmortyapi.com:443",
+    "path": "/api/character",
+    "is_regex": false,
+    "status_code": 200,
+    "latency_ms": 200,
+    "response": "{}",
+    "content_type": "application/json",
+    "is_active": true
+  }
+]

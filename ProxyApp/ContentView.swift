@@ -13,11 +13,11 @@ struct ContentView: View {
     @EnvironmentObject private var proxyCore: ProxyCore
     @EnvironmentObject private var authViewModel: AuthorizeAppViewModel
     @StateObject private var viewModel: HomeViewModel
-    @State private var searchIsActive: Bool = false
     @State private var searchText: String = ""
     @State private var searchPath: String = ""
-    @State private var selectedBasePath: BasePathModel?
-    
+    @State private var showSimulatorSheet: Bool = false
+    @State private var showProxyErrorAlert: Bool = false
+
     init(proxyCore: ProxyCore) {
         _viewModel = StateObject(wrappedValue: HomeViewModel(proxyCore: proxyCore))
     }
@@ -36,7 +36,8 @@ struct ContentView: View {
                     Image(systemName: "play.fill")
                 }
                 .disabled(proxyCore.isRunning)
-                .padding(.trailing, 8)
+                .help("Start proxy daemon")
+                .accessibilityLabel("Start proxy")
 
                 Button {
                     proxyCore.stopDaemon()
@@ -44,47 +45,22 @@ struct ContentView: View {
                     Image(systemName: "stop.fill")
                 }
                 .disabled(!proxyCore.isRunning)
+                .help("Stop proxy daemon")
+                .accessibilityLabel("Stop proxy")
 
-                HStack(spacing: 10) {
-                    Image(systemName: "network")
-                        .foregroundStyle(.secondary)
-
-                    if proxyCore.isRunning {
-                        HStack(spacing: 12) {
-                            Text("127.0.0.1:8080")
-                                .font(.caption)
-
-                            if let localIP = viewModel.ipOnEthernet() {
-                                Text("\(localIP):8080")
-                                    .font(.caption)
-                            } else {
-                                Text("LAN IP: N/A")
-                                    .font(.caption2)
-                            }
-
-                            Text("Running")
-                                .font(.caption2)
-                                .foregroundColor(.green)
-                        }
-                    } else {
-                        HStack(spacing: 12) {
-                            Text("Proxy Offline")
-                                .font(.caption)
-                                .foregroundColor(.gray)
-                            Text("ClickStart")
-                                .font(.caption2)
-                                .foregroundColor(.gray)
-                        }
+                Menu {
+                    Button("Install on iOS Simulator…") {
+                        showSimulatorSheet = true
                     }
-
-                    Circle()
-                        .fill(proxyCore.isRunning ? Color.green : Color.gray)
-                        .frame(width: 10, height: 10)
+                } label: {
+                    Image(systemName: "lock.shield")
                 }
-                .padding(8)
-                .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(Color(.windowBackgroundColor).opacity(0.6))
+                .help("Certificate")
+                .accessibilityLabel("Certificate menu")
+
+                ProxyStatusPill(
+                    isRunning: proxyCore.isRunning,
+                    localIP: viewModel.ipOnEthernet()
                 )
             }
         }
@@ -93,86 +69,174 @@ struct ContentView: View {
         .sheet(isPresented: $authViewModel.showAuthorizationSheet) {
             AuthAppView()
         }
+        .sheet(isPresented: $showSimulatorSheet) {
+            SimulatorCertificateView()
+        }
+        .onChange(of: proxyCore.lastError) { _, newValue in
+            showProxyErrorAlert = (newValue?.isEmpty == false)
+        }
+        .alert("Proxy", isPresented: $showProxyErrorAlert, presenting: proxyCore.lastError) { _ in
+            Button("OK") { showProxyErrorAlert = false }
+        } message: { msg in
+            Text(msg)
+        }
         .navigationTitle("")
     }
     
     // MARK: - Sidebar (Left)
     private var sidebar: some View {
-        
-        var filterPath: [AgentModel] {
-            if searchPath.isEmpty {
-                return viewModel.agents
-            }
-            return viewModel.agents.filter({$0.basePaths.contains(where: {$0.basePath.lowercased().contains(searchPath.lowercased())})})
-        }
-        
-        return List(selection: $selectedBasePath) {
-            TextField("Cerca...", text: $searchPath)
-                .padding(.vertical)
-            ForEach(filterPath) { agent in
-                Section(header: Text(agent.ip).bold()) {
-                    ForEach(agent.basePaths) { basePath in
-                        let isSelected = viewModel.filterIP == agent.ip && viewModel.filterPath == basePath.basePath
-                        HStack {
-                            Text(basePath.basePath)
-                                .padding(.vertical, 8)
-                                .padding(.horizontal, 4)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(
-                                    isSelected ? Color.accentColor.opacity(0.2) : Color.clear
-                                )
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
-                        }
-                        .contentShape(Rectangle()) // makes entire row tappable
-                        .onTapGesture {
-                            viewModel.filterIP = agent.ip
-                            viewModel.filterPath = basePath.basePath
-                        }
-                    }
-                }
-            }
-        }
-        .navigationSplitViewColumnWidth(min: 200, ideal: 250)
+        SidebarTreeView(viewModel: viewModel, searchText: $searchPath)
+            .navigationSplitViewColumnWidth(min: 240, ideal: 280)
     }
     
     
     private var detailView: some View {
         VSplitView {
             VStack(spacing: 0) {
-                KeyCaptureView { event in
-                    if event.modifierFlags.contains(.command) && event.characters == "f" {
-                        searchIsActive.toggle()
-                    }
+                connectionBanner
+                if viewModel.selectedSidebarItem == nil {
+                    welcomeView
+                } else {
+                    LogTableView(
+                        viewModel: viewModel,
+                        logs: viewModel.filteredLogs,
+                        filter: $searchText
+                    )
+                    .searchable(text: $searchText, placement: .toolbar, prompt: "Filter requests")
                 }
-                .frame(width: 0, height: 0)
-                
-                if searchIsActive {
-                    HStack {
-                        TextField("Cerca...", text: $searchText)
-                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                            .padding(8)
-                        Button("Cancel") {
-                            searchIsActive = false
-                            searchText = ""
-                        }
-                        .padding(.trailing, 8)
-                    }
-                }
-                
-                // PRIMO PANNELLO: tabella con i risultati filtrati
-                LogTableView(viewModel: viewModel, logs: viewModel.listBasePathRequest(), filter: $searchText)
             }
-            
-            // SECONDO PANNELLO: Dettaglio
+
             if let selected = viewModel.selectedLog {
                 LogDetailView(log: selected)
                     .frame(minHeight: 200, maxHeight: .infinity)
             } else {
-                Text("Nessun log selezionato")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .foregroundStyle(.secondary)
+                detailPlaceholder
             }
         }
-        
+    }
+
+    @ViewBuilder
+    private var connectionBanner: some View {
+        switch proxyCore.connectionState {
+        case .connecting:
+            BannerView(
+                icon: "antenna.radiowaves.left.and.right",
+                tint: .blue,
+                title: "Connecting to daemon",
+                message: "Waiting for proxycore to respond on 127.0.0.1:8081…"
+            )
+        case .retrying(let attempt):
+            BannerView(
+                icon: "arrow.triangle.2.circlepath",
+                tint: .orange,
+                title: "Reconnecting (attempt \(attempt))",
+                message: "Lost connection to the daemon. Retrying with backoff."
+            )
+        case .failed(let reason):
+            BannerView(
+                icon: "exclamationmark.triangle.fill",
+                tint: .red,
+                title: "Daemon unavailable",
+                message: reason
+            )
+        case .connected, .idle:
+            EmptyView()
+        }
+    }
+
+    private var welcomeView: some View {
+        VStack(spacing: Spacing.lg) {
+            Image(systemName: proxyCore.isRunning ? "wave.3.right" : "play.rectangle")
+                .font(.system(size: 44, weight: .regular))
+                .foregroundStyle(Surface.secondaryText)
+
+            Text(proxyCore.isRunning ? "Listening for requests" : "PacketPeek is idle")
+                .font(Typography.title)
+
+            VStack(alignment: .leading, spacing: Spacing.md) {
+                welcomeStep(
+                    n: 1,
+                    text: proxyCore.isRunning ? "Proxy is running" : "Start the proxy from the toolbar",
+                    done: proxyCore.isRunning
+                )
+                welcomeStep(
+                    n: 2,
+                    text: "Install the CA on your iOS Simulator (Certificate menu)",
+                    done: false
+                )
+                welcomeStep(
+                    n: 3,
+                    text: "Make a request from the simulator — it will appear in the sidebar",
+                    done: false
+                )
+            }
+            .padding(Spacing.lg)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.md)
+                    .fill(Surface.elevated)
+            )
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(Spacing.xl)
+    }
+
+    private func welcomeStep(n: Int, text: String, done: Bool) -> some View {
+        HStack(spacing: Spacing.md) {
+            ZStack {
+                Circle()
+                    .fill(done ? Color.green : Surface.separator)
+                    .frame(width: 22, height: 22)
+                if done {
+                    Image(systemName: "checkmark")
+                        .font(.caption2.bold())
+                        .foregroundStyle(.white)
+                } else {
+                    Text("\(n)")
+                        .font(Typography.badge)
+                        .foregroundStyle(Surface.secondaryText)
+                }
+            }
+            Text(text)
+                .font(Typography.body)
+                .foregroundStyle(done ? Surface.secondaryText : .primary)
+                .strikethrough(done, color: Surface.secondaryText)
+        }
+    }
+
+    private var detailPlaceholder: some View {
+        VStack(spacing: Spacing.sm) {
+            Image(systemName: "doc.text.magnifyingglass")
+                .font(.system(size: 28))
+                .foregroundStyle(Surface.secondaryText)
+            Text("Select a request to inspect")
+                .font(Typography.caption)
+                .foregroundStyle(Surface.secondaryText)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private struct BannerView: View {
+    let icon: String
+    let tint: Color
+    let title: String
+    let message: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: Spacing.sm) {
+            Image(systemName: icon)
+                .foregroundStyle(tint)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(Typography.badge).foregroundStyle(.primary)
+                Text(message).font(Typography.caption).foregroundStyle(Surface.secondaryText)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, Spacing.md)
+        .padding(.vertical, Spacing.sm)
+        .background(tint.opacity(0.08))
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(tint.opacity(0.3)).frame(height: 0.5)
+        }
     }
 }

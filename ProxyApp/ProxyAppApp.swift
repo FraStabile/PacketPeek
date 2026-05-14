@@ -8,8 +8,17 @@
 import SwiftUI
 import SwiftData
 import Papyrus
+import AppKit
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        true
+    }
+}
+
 @main
 struct ProxyAppApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject var proxyCore: ProxyCore = ProxyCore()
     @StateObject var authViewModel: AuthorizeAppViewModel = AuthorizeAppViewModel()
     @StateObject var mockEditorViewModel: MockModalEditViewModel = MockModalEditViewModel()
@@ -21,6 +30,9 @@ struct ProxyAppApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView(proxyCore: proxyCore)
+                .task {
+                    await SystemProxyManager.shared.cleanupStaleStateIfNeeded()
+                }
                 .sheet(item: $modalRouter.activeModal) { modal in
                     switch modal {
                     case .tutorial:

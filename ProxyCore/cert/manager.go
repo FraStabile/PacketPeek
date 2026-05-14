@@ -11,38 +11,57 @@ import (
 	"math/big"
 	"net"
 	"os"
+	"path/filepath"
+	"sync"
 	"time"
 )
 
 const (
-	caKeyFile  = "ca.key"
-	caCertFile = "ca.pem"
+	caKeyName  = "ca.key"
+	caCertName = "ca.pem"
 )
 
 type CertManager struct {
-	CACert *x509.Certificate
-	CAKey  *rsa.PrivateKey
+	CACert    *x509.Certificate
+	CAKey     *rsa.PrivateKey
+	keyPath   string
+	certPath  string
+	mu        sync.Mutex
+	leafCache map[string]*tls.Certificate
 }
 
-func NewCertManager() (*CertManager, error) {
-	cm := &CertManager{}
+// NewCertManager loads (or generates) the root CA from baseDir.
+// Files: <baseDir>/ca.pem (0644) and <baseDir>/ca.key (0600).
+func NewCertManager(baseDir string) (*CertManager, error) {
+	if baseDir == "" {
+		baseDir = "."
+	}
+	if err := os.MkdirAll(baseDir, 0700); err != nil {
+		return nil, fmt.Errorf("cannot create cert dir: %w", err)
+	}
+	cm := &CertManager{
+		keyPath:   filepath.Join(baseDir, caKeyName),
+		certPath:  filepath.Join(baseDir, caCertName),
+		leafCache: make(map[string]*tls.Certificate),
+	}
 
-	// Try to load existing CA
 	if err := cm.loadCA(); err == nil {
 		return cm, nil
 	}
 
-	// Generate new CA if not exists
 	if err := cm.generateCA(); err != nil {
-		return nil, fmt.Errorf("failed to generate CA: %v", err)
+		return nil, fmt.Errorf("failed to generate CA: %w", err)
 	}
-
 	return cm, nil
 }
 
+// CertPath returns the absolute path of the CA PEM (for HTTP cert downloads).
+func (cm *CertManager) CertPath() string {
+	return cm.certPath
+}
+
 func (cm *CertManager) loadCA() error {
-	// Load CA Key
-	keyData, err := os.ReadFile(caKeyFile)
+	keyData, err := os.ReadFile(cm.keyPath)
 	if err != nil {
 		return err
 	}
@@ -55,8 +74,7 @@ func (cm *CertManager) loadCA() error {
 		return err
 	}
 
-	// Load CA Certificate
-	certData, err := os.ReadFile(caCertFile)
+	certData, err := os.ReadFile(cm.certPath)
 	if err != nil {
 		return err
 	}
@@ -69,28 +87,37 @@ func (cm *CertManager) loadCA() error {
 		return err
 	}
 
+	// If the key file has weak permissions, tighten it now.
+	if info, err := os.Stat(cm.keyPath); err == nil && info.Mode().Perm() != 0600 {
+		_ = os.Chmod(cm.keyPath, 0600)
+	}
 	return nil
 }
 
 func (cm *CertManager) generateCA() error {
-	key, err := rsa.GenerateKey(rand.Reader, 4096) // Aumentato a 4096 bit per maggiore sicurezza
+	key, err := rsa.GenerateKey(rand.Reader, 4096)
+	if err != nil {
+		return err
+	}
+
+	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 	if err != nil {
 		return err
 	}
 
 	template := &x509.Certificate{
-		SerialNumber: big.NewInt(1),
+		SerialNumber: serial,
 		Subject: pkix.Name{
-			Organization: []string{"ProxyCore CA"},
-			CommonName:   "ProxyCore Root CA",
+			Organization: []string{"PacketPeek CA"},
+			CommonName:   "PacketPeek Root CA",
 			Country:      []string{"IT"},
 		},
-		NotBefore:             time.Now().Add(-time.Hour * 24), // Valido da ieri
-		NotAfter:              time.Now().AddDate(10, 0, 0),    // Valido per 10 anni
+		NotBefore:             time.Now().Add(-time.Hour * 24),
+		NotAfter:              time.Now().AddDate(10, 0, 0),
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		BasicConstraintsValid: true,
 		IsCA:                  true,
-		MaxPathLen:            0, // Non permettere sub-CA
+		MaxPathLen:            0,
 	}
 
 	derBytes, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
@@ -98,28 +125,42 @@ func (cm *CertManager) generateCA() error {
 		return err
 	}
 
-	// Save CA certificate
-	certOut, err := os.Create(caCertFile)
-	if err != nil {
+	// Write public cert with 0644 (it's a certificate, meant to be distributed).
+	if err := os.WriteFile(cm.certPath,
+		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: derBytes}),
+		0644); err != nil {
 		return err
 	}
-	defer certOut.Close()
-	pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
 
-	// Save CA private key
-	keyOut, err := os.Create(caKeyFile)
-	if err != nil {
+	// Write private key with 0600.
+	if err := os.WriteFile(cm.keyPath,
+		pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}),
+		0600); err != nil {
 		return err
 	}
-	defer keyOut.Close()
-	pem.Encode(keyOut, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
 
 	cm.CACert = template
 	cm.CAKey = key
 	return nil
 }
 
+// GenerateCertificate signs (and caches) a leaf cert for the given host.
+// If the host arrives with a port, it is stripped for the SAN/CN.
 func (cm *CertManager) GenerateCertificate(host string) (*tls.Certificate, error) {
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	if host == "" {
+		return nil, fmt.Errorf("empty host for cert generation")
+	}
+
+	cm.mu.Lock()
+	if cached, ok := cm.leafCache[host]; ok {
+		cm.mu.Unlock()
+		return cached, nil
+	}
+	cm.mu.Unlock()
+
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return nil, err
@@ -130,38 +171,24 @@ func (cm *CertManager) GenerateCertificate(host string) (*tls.Certificate, error
 		return nil, err
 	}
 
-	// Estrai il dominio base per il Subject CN e gestisci IP
-	hostname := host
 	var ips []net.IP
-
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		hostname = h
-	}
-
-	// Controlla se l'hostname è un IP
-	ip := net.ParseIP(hostname)
-	if ip != nil {
+	if ip := net.ParseIP(host); ip != nil {
 		ips = append(ips, ip)
-	} else {
-		// Prova a risolvere il DNS
-		if resolved, err := net.LookupIP(hostname); err == nil {
-			ips = append(ips, resolved...)
-		}
 	}
 
 	template := &x509.Certificate{
 		SerialNumber: serialNumber,
 		Subject: pkix.Name{
-			Organization: []string{"ProxyCore Dynamic Cert"},
-			CommonName:   hostname,
+			Organization: []string{"PacketPeek Dynamic Cert"},
+			CommonName:   host,
 			Country:      []string{"IT"},
 		},
-		NotBefore:             time.Now().Add(-time.Hour * 24), // Valido da ieri
-		NotAfter:              time.Now().AddDate(1, 0, 0),     // Valido per 1 anno
+		NotBefore:             time.Now().Add(-time.Hour * 24),
+		NotAfter:              time.Now().AddDate(1, 0, 0),
 		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
-		DNSNames:              []string{hostname},
+		DNSNames:              []string{host},
 		IPAddresses:           ips,
 	}
 
@@ -177,5 +204,9 @@ func (cm *CertManager) GenerateCertificate(host string) (*tls.Certificate, error
 	if err != nil {
 		return nil, err
 	}
+
+	cm.mu.Lock()
+	cm.leafCache[host] = &cert
+	cm.mu.Unlock()
 	return &cert, nil
 }

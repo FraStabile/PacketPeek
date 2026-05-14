@@ -54,7 +54,6 @@ class SettingsManager: SettingsManagerProtocol {
       }
       
       func getDefaultSettings() -> SettingsModel {
-          // Imposta qui i valori predefiniti per le tue impostazioni
-          return SettingsModel(general: GeneralSettingsModel(theme: "light", language: "it"))
+          return SettingsModel(general: GeneralSettingsModel(theme: .system, language: "it"))
       }
 }

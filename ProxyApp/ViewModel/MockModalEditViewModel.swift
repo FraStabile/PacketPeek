@@ -51,16 +51,27 @@ class MockModalEditViewModel: BaseViewModel {
     }
     
     
+    @MainActor
     func setupMocks() async {
         var host = log.url.host
         if let port = log.url.port {
             host += ":\(port)"
         }
-        let requestData = MockItemRequest(method: log.method, host: host, path: log.url.path, isRegex: false, statusCode: Int(statusCode) ?? 0, latencyMS: Int(statusCode) ?? 0, response: response.trim(), contentType: "application/json", isActive: true)
+        let requestData = MockItemRequest(
+            method: log.method,
+            host: host,
+            path: log.url.path,
+            isRegex: false,
+            statusCode: Int(statusCode) ?? 0,
+            latencyMS: Int(latency) ?? 0,
+            response: response.trim(),
+            contentType: "application/json",
+            isActive: true
+        )
         do {
             try await repo.updateMock(requestData)
         } catch {
-            print("Error")
+            print("Failed to save mock:", error)
         }
     }
 }

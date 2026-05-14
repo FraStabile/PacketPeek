@@ -114,6 +114,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = FF34EF4E2D95CC7B0029BED2 /* Build configuration list for PBXNativeTarget "PacketPeek" */;
 			buildPhases = (
+				13B17D1A2DC0DE0000000001 /* Build proxycore (Go) */,
 				FF34EF232D95CC790029BED2 /* Sources */,
 				FF34EF242D95CC790029BED2 /* Frameworks */,
 				FF34EF252D95CC790029BED2 /* Resources */,
@@ -255,6 +256,29 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		13B17D1A2DC0DE0000000001 /* Build proxycore (Go) */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Build proxycore (Go)";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(SRCROOT)/ProxyApp/ProxyCore/proxycore",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "set -euo pipefail\n\n# Skip during indexing builds (Xcode runs these for code completion).\nif [ \"${ACTION:-}\" = \"indexbuild\" ]; then\n  exit 0\nfi\n\nGO_SRC=\"${SRCROOT}/ProxyCore\"\nOUT=\"${SRCROOT}/ProxyApp/ProxyCore/proxycore\"\n\n# Find go. Xcode's shell env is minimal — check common install paths.\nGO_BIN=\"${GO_BIN_OVERRIDE:-}\"\nif [ -z \"$GO_BIN\" ]; then\n  for c in /opt/homebrew/bin/go /usr/local/bin/go /usr/local/go/bin/go \"$HOME/go/bin/go\"; do\n    if [ -x \"$c\" ]; then GO_BIN=\"$c\"; break; fi\n  done\nfi\nif [ -z \"$GO_BIN\" ]; then GO_BIN=\"$(command -v go || true)\"; fi\nif [ -z \"$GO_BIN\" ]; then\n  echo \"error: go toolchain not found. Install Go (https://go.dev/) or set GO_BIN_OVERRIDE in build settings.\"\n  exit 1\nfi\n\n# Pick GOARCH from the slice Xcode is currently building.\nARCH=\"${NATIVE_ARCH_ACTUAL:-${CURRENT_ARCH:-arm64}}\"\ncase \"$ARCH\" in\n  arm64) GOARCH=arm64 ;;\n  x86_64) GOARCH=amd64 ;;\n  *) GOARCH=arm64 ;;\nesac\n\necho \"\\xE2\\x86\\x92 Building proxycore for $GOARCH using $GO_BIN\"\nmkdir -p \"$(dirname \"$OUT\")\"\ncd \"$GO_SRC\"\nGOOS=darwin GOARCH=$GOARCH \"$GO_BIN\" build -trimpath -o \"$OUT\" .\necho \"\\xE2\\x9C\\x93 proxycore built at $OUT\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		FF34EF232D95CC790029BED2 /* Sources */ = {
@@ -429,6 +453,7 @@
 				DEVELOPMENT_TEAM = L6VZWYT2TT;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = ProxyApp/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = PacketPeek;
@@ -461,6 +486,7 @@
 				DEVELOPMENT_TEAM = L6VZWYT2TT;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = ProxyApp/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = PacketPeek;

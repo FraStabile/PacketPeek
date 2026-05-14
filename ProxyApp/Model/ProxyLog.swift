@@ -22,7 +22,7 @@ struct ProxyLog: Codable, Hashable, Identifiable {
     var statusCode: Int
     var responseHeaders: [String: String]
     var responseBody: String?
-    var responseTime: Double // Se il tempo di risposta è un numero
+    var responseTime: Double
     var timestamp: Date
     var completed: Date
 
@@ -39,72 +39,81 @@ struct ProxyLog: Codable, Hashable, Identifiable {
         case userAgent = "user_agent", deviceInfo = "device_info", isSimulator = "is_simulator", appIdentifier = "app_identifier"
     }
 
-    // Custom decoder per trattare il timestamp come stringa
+    /// Lenient decoder: every backend field is treated as optional so a partial /
+    /// best-effort log entry from the proxy still surfaces in the UI instead of
+    /// being dropped silently.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-
-        self.method = try container.decode(String.self, forKey: .method)
-        self.url = try container.decode(String.self, forKey: .url)
-        self.protocol = try container.decode(String.self, forKey: .protocol)
-        self.clientIP = try container.decode(String.self, forKey: .clientIP)
-        self.requestHeaders = try container.decode([String: String].self, forKey: .requestHeaders)
-        self.requestBody = try container.decodeIfPresent(String.self, forKey: .requestBody)
-
-        self.statusCode = try container.decode(Int.self, forKey: .statusCode)
-        self.responseHeaders = try container.decode([String: String].self, forKey: .responseHeaders)
-        self.responseBody = try container.decodeIfPresent(String.self, forKey: .responseBody)
-        self.responseTime = try container.decode(Double.self, forKey: .responseTime).rounded(.up)
-
-        // Se il timestamp è una stringa, usa un DateFormatter per convertirlo in Date
-        let timestampString = try container.decode(String.self, forKey: .timestamp)
         let formatter = ISO8601DateFormatter()
-        self.timestamp = formatter.date(from: timestampString) ?? Date()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let fallbackFormatter = ISO8601DateFormatter()
+        fallbackFormatter.formatOptions = [.withInternetDateTime]
 
-        let completedString = try container.decode(String.self, forKey: .completed)
-        self.completed = formatter.date(from: completedString) ?? Date()
+        self.method          = (try? container.decodeIfPresent(String.self, forKey: .method))       ?? ""
+        self.url             = (try? container.decodeIfPresent(String.self, forKey: .url))          ?? ""
+        self.protocol        = (try? container.decodeIfPresent(String.self, forKey: .protocol))     ?? ""
+        self.clientIP        = (try? container.decodeIfPresent(String.self, forKey: .clientIP))     ?? ""
+        self.requestHeaders  = (try? container.decodeIfPresent([String: String].self, forKey: .requestHeaders)) ?? [:]
+        self.requestBody     = try? container.decodeIfPresent(String.self, forKey: .requestBody)
 
-        self.userAgent = try container.decodeIfPresent(String.self, forKey: .userAgent)
-        self.deviceInfo = try container.decodeIfPresent(String.self, forKey: .deviceInfo)
-        self.isSimulator = try container.decode(Bool.self, forKey: .isSimulator)
-        self.appIdentifier = try container.decodeIfPresent(String.self, forKey: .appIdentifier)
+        self.statusCode      = (try? container.decodeIfPresent(Int.self, forKey: .statusCode))      ?? 0
+        self.responseHeaders = (try? container.decodeIfPresent([String: String].self, forKey: .responseHeaders)) ?? [:]
+        self.responseBody    = try? container.decodeIfPresent(String.self, forKey: .responseBody)
+        self.responseTime    = ((try? container.decodeIfPresent(Double.self, forKey: .responseTime)) ?? 0).rounded(.up)
+
+        if let timestampString = try? container.decodeIfPresent(String.self, forKey: .timestamp),
+           let parsed = formatter.date(from: timestampString) ?? fallbackFormatter.date(from: timestampString) {
+            self.timestamp = parsed
+        } else {
+            self.timestamp = Date()
+        }
+
+        if let completedString = try? container.decodeIfPresent(String.self, forKey: .completed),
+           let parsed = formatter.date(from: completedString) ?? fallbackFormatter.date(from: completedString) {
+            self.completed = parsed
+        } else {
+            self.completed = self.timestamp
+        }
+
+        self.userAgent     = try? container.decodeIfPresent(String.self, forKey: .userAgent)
+        self.deviceInfo    = try? container.decodeIfPresent(String.self, forKey: .deviceInfo)
+        self.isSimulator   = (try? container.decodeIfPresent(Bool.self, forKey: .isSimulator)) ?? false
+        self.appIdentifier = try? container.decodeIfPresent(String.self, forKey: .appIdentifier)
     }
-    
-    init(
-           method: String = "",
-           url: String = "",
-           `protocol`: String = "",
-           clientIP: String = "",
-           requestHeaders: [String: String] = [:],
-           requestBody: String? = nil,
-           statusCode: Int = 200,
-           responseHeaders: [String: String] = [:],
-           responseBody: String? = nil,
-           responseTime: Double = 0.0,
-           timestamp: Date = Date(),
-           completed: Date = Date(),
-           userAgent: String? = nil,
-           deviceInfo: String? = nil,
-           isSimulator: Bool = false,
-           appIdentifier: String? = nil
-       ) {
-           self.method = method
-           self.url = url
-           self.`protocol` = `protocol`
-           self.clientIP = clientIP
-           self.requestHeaders = requestHeaders
-           self.requestBody = requestBody
-           self.statusCode = statusCode
-           self.responseHeaders = responseHeaders
-           self.responseBody = responseBody
-           self.responseTime = responseTime
-           self.timestamp = timestamp
-           self.completed = completed
-           self.userAgent = userAgent
-           self.deviceInfo = deviceInfo
-           self.isSimulator = isSimulator
-           self.appIdentifier = appIdentifier
-       }
-    
-    
-}
 
+    init(
+        method: String = "",
+        url: String = "",
+        `protocol`: String = "",
+        clientIP: String = "",
+        requestHeaders: [String: String] = [:],
+        requestBody: String? = nil,
+        statusCode: Int = 200,
+        responseHeaders: [String: String] = [:],
+        responseBody: String? = nil,
+        responseTime: Double = 0.0,
+        timestamp: Date = Date(),
+        completed: Date = Date(),
+        userAgent: String? = nil,
+        deviceInfo: String? = nil,
+        isSimulator: Bool = false,
+        appIdentifier: String? = nil
+    ) {
+        self.method = method
+        self.url = url
+        self.`protocol` = `protocol`
+        self.clientIP = clientIP
+        self.requestHeaders = requestHeaders
+        self.requestBody = requestBody
+        self.statusCode = statusCode
+        self.responseHeaders = responseHeaders
+        self.responseBody = responseBody
+        self.responseTime = responseTime
+        self.timestamp = timestamp
+        self.completed = completed
+        self.userAgent = userAgent
+        self.deviceInfo = deviceInfo
+        self.isSimulator = isSimulator
+        self.appIdentifier = appIdentifier
+    }
+}

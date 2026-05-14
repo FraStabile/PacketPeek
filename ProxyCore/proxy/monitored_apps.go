@@ -2,14 +2,15 @@ package proxy
 
 import (
 	"encoding/json"
-	"io/ioutil"
+	"fmt"
+	"os"
 	"sync"
 )
 
 type MonitoredApp struct {
-	BundleID      string `json:"bundle_id"`
-	Name          string `json:"name"`
-	DecryptTraffic bool  `json:"decrypt_traffic"`
+	BundleID       string `json:"bundle_id"`
+	Name           string `json:"name"`
+	DecryptTraffic bool   `json:"decrypt_traffic"`
 }
 
 type MonitoredAppsManager struct {
@@ -23,58 +24,54 @@ func NewMonitoredAppsManager(configFile string) *MonitoredAppsManager {
 		apps: make(map[string]MonitoredApp),
 		file: configFile,
 	}
-	manager.loadFromFile()
+	_ = manager.loadFromFile()
 	return manager
 }
 
 func (m *MonitoredAppsManager) loadFromFile() error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	data, err := ioutil.ReadFile(m.file)
+	data, err := os.ReadFile(m.file)
 	if err != nil {
 		return err
 	}
-
 	var apps []MonitoredApp
 	if err := json.Unmarshal(data, &apps); err != nil {
 		return err
 	}
-
+	m.mu.Lock()
 	for _, app := range apps {
 		m.apps[app.BundleID] = app
 	}
+	m.mu.Unlock()
 	return nil
 }
 
-func (m *MonitoredAppsManager) saveToFile() error {
-	m.mu.RLock()
+func (m *MonitoredAppsManager) saveToFileLocked() error {
 	apps := make([]MonitoredApp, 0, len(m.apps))
 	for _, app := range m.apps {
 		apps = append(apps, app)
 	}
-	m.mu.RUnlock()
-
 	data, err := json.MarshalIndent(apps, "", "  ")
 	if err != nil {
 		return err
 	}
-
-	return ioutil.WriteFile(m.file, data, 0644)
+	return writeAtomic(m.file, data)
 }
 
 func (m *MonitoredAppsManager) AddApp(app MonitoredApp) error {
+	if app.BundleID == "" {
+		return fmt.Errorf("bundle_id is required")
+	}
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.apps[app.BundleID] = app
-	m.mu.Unlock()
-	return m.saveToFile()
+	return m.saveToFileLocked()
 }
 
 func (m *MonitoredAppsManager) RemoveApp(bundleID string) error {
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	delete(m.apps, bundleID)
-	m.mu.Unlock()
-	return m.saveToFile()
+	return m.saveToFileLocked()
 }
 
 func (m *MonitoredAppsManager) GetApp(bundleID string) (MonitoredApp, bool) {
