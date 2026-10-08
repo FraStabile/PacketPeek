@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -44,7 +46,7 @@ type RequestLog struct {
 	StatusCode      int               `json:"status_code"`
 	ResponseHeaders map[string]string `json:"response_headers"`
 	ResponseBody    string            `json:"response_body,omitempty"`
-	ResponseTime    time.Duration     `json:"response_time_ms"`
+	ResponseTime    Milliseconds      `json:"response_time_ms"`
 
 	Timestamp time.Time `json:"timestamp"`
 	Completed time.Time `json:"completed"`
@@ -57,6 +59,25 @@ type RequestLog struct {
 	// Mocked is true when the response was synthesized from a mock rule and
 	// the request never reached the real server.
 	Mocked bool `json:"mocked"`
+}
+
+// Milliseconds is a duration serialized to JSON as fractional milliseconds
+// (e.g. 12.345). A bare time.Duration would serialize as nanoseconds, which is
+// what "response_time_ms" used to contain.
+type Milliseconds time.Duration
+
+func (m Milliseconds) MarshalJSON() ([]byte, error) {
+	ms := float64(m) / float64(time.Millisecond)
+	return strconv.AppendFloat(nil, math.Round(ms*1000)/1000, 'f', -1, 64), nil
+}
+
+func (m *Milliseconds) UnmarshalJSON(b []byte) error {
+	ms, err := strconv.ParseFloat(string(b), 64)
+	if err != nil {
+		return err
+	}
+	*m = Milliseconds(ms * float64(time.Millisecond))
+	return nil
 }
 
 type ProxyServer struct {
@@ -273,7 +294,7 @@ func (p *ProxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	logEntry.ResponseBody = respBody.String(resp.Header.Get("Content-Encoding"))
 
 	logEntry.Completed = time.Now()
-	logEntry.ResponseTime = logEntry.Completed.Sub(logEntry.Timestamp)
+	logEntry.ResponseTime = Milliseconds(logEntry.Completed.Sub(logEntry.Timestamp))
 	p.addLog(logEntry)
 }
 
@@ -318,7 +339,7 @@ func (p *ProxyServer) serveMockHTTP(w http.ResponseWriter, m *MockResponse, entr
 	}
 	entry.ResponseBody = m.Response
 	entry.Completed = time.Now()
-	entry.ResponseTime = entry.Completed.Sub(entry.Timestamp)
+	entry.ResponseTime = Milliseconds(entry.Completed.Sub(entry.Timestamp))
 	p.addLog(*entry)
 }
 
@@ -446,7 +467,7 @@ func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 			reqLog.ResponseHeaders = map[string]string{"X-Mock-Response": "true", "Content-Type": mockResp.EffectiveContentType()}
 			reqLog.ResponseBody = mockResp.Response
 			reqLog.Completed = time.Now()
-			reqLog.ResponseTime = reqLog.Completed.Sub(reqLog.Timestamp)
+			reqLog.ResponseTime = Milliseconds(reqLog.Completed.Sub(reqLog.Timestamp))
 			p.addLog(reqLog)
 			continue
 		}
@@ -500,7 +521,7 @@ func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 		resp.Body.Close()
 		reqLog.ResponseBody = respBody.String(resp.Header.Get("Content-Encoding"))
 		reqLog.Completed = time.Now()
-		reqLog.ResponseTime = reqLog.Completed.Sub(reqLog.Timestamp)
+		reqLog.ResponseTime = Milliseconds(reqLog.Completed.Sub(reqLog.Timestamp))
 		p.addLog(reqLog)
 
 		if writeErr != nil {

@@ -280,7 +280,7 @@ final class HomeViewModel: BaseViewModel {
             📥 RESPONSE
             ----------------------------
             📡 Status: \(request.statusCode)
-            ⏱ Duration: \(String(format: "%.2f", request.responseTime * 1000)) ms
+            ⏱ Duration: \(String(format: "%.2f", request.responseTime)) ms
             🧾 Headers:
             \(request.responseHeaders.map { "\($0.key): \($0.value)" }.joined(separator: "\n"))
             

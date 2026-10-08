@@ -22,6 +22,7 @@ struct ProxyLog: Codable, Hashable, Identifiable {
     var statusCode: Int
     var responseHeaders: [String: String]
     var responseBody: String?
+    /// Milliseconds (the daemon sends fractional ms in `response_time_ms`).
     var responseTime: Double
     var timestamp: Date
     var completed: Date
