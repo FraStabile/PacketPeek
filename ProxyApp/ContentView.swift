@@ -60,7 +60,8 @@ struct ContentView: View {
 
                 ProxyStatusPill(
                     isRunning: proxyCore.isRunning,
-                    localIP: viewModel.ipOnEthernet()
+                    localIP: viewModel.ipOnEthernet(),
+                    stoppedIdle: proxyCore.connectionState == .stoppedIdle
                 )
             }
         }
@@ -138,6 +139,13 @@ struct ContentView: View {
                 tint: .red,
                 title: "Daemon unavailable",
                 message: reason
+            )
+        case .stoppedIdle:
+            BannerView(
+                icon: "moon.zzz",
+                tint: .secondary,
+                title: "Stopped (idle)",
+                message: "The proxy shut down after 5 minutes without traffic. System proxy settings were restored. Press Play to start it again."
             )
         case .connected, .idle:
             EmptyView()

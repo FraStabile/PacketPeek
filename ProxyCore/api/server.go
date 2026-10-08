@@ -52,6 +52,14 @@ func NewAPIServer(proxyServer *proxy.ProxyServer, token, runtimeDir string) *API
 	}
 }
 
+// ActiveClients returns the number of connected WebSocket clients (the UI).
+// The daemon's idle watcher treats any connected client as activity.
+func (s *APIServer) ActiveClients() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.clients)
+}
+
 // HTTPServer returns a configured *http.Server bound to addr. Caller runs ListenAndServe.
 func (s *APIServer) HTTPServer(addr string) *http.Server {
 	mux := http.NewServeMux()

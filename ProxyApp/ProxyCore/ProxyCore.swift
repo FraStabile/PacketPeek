@@ -24,7 +24,13 @@ final class ProxyCore: ObservableObject {
         case connected
         case retrying(attempt: Int)
         case failed(String)
+        /// The daemon exited on its own after the idle timeout (no traffic and
+        /// no UI attached). Not an error: the user just presses Play again.
+        case stoppedIdle
     }
+
+    /// Exit status proxycore uses after an idle shutdown (`exitCodeIdle` in main.go).
+    private static let idleExitCode: Int32 = 3
 
     private let executableName = "proxycore"
     private var goProcess: Process?
@@ -128,13 +134,22 @@ final class ProxyCore: ObservableObject {
 
         process.terminationHandler = { [weak self] proc in
             Task { @MainActor in
-                guard let self else { return }
-                self.isRunning = false
+                // stopDaemon() already cleaned up (and may have started a new
+                // process since): only react to the process we still own.
+                guard let self, self.goProcess === proc else { return }
                 self.goProcess = nil
-                if proc.terminationStatus != 0 {
-                    self.lastError = "proxycore exited with status \(proc.terminationStatus)"
-                }
+                self.isRunning = false
                 self.stopReceiveLoops()
+                if proc.terminationReason == .exit && proc.terminationStatus == Self.idleExitCode {
+                    self.connectionState = .stoppedIdle
+                } else {
+                    self.connectionState = .idle
+                    if proc.terminationStatus != 0 {
+                        self.lastError = "proxycore exited with status \(proc.terminationStatus)"
+                    }
+                }
+                // The system proxy still points at 127.0.0.1:8080: with the
+                // daemon gone the Mac would have no network until we undo it.
                 await self.disableSystemProxy()
             }
         }
