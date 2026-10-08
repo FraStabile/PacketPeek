@@ -4,8 +4,10 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"log"
+	"mime"
+	"net"
 	"net/http"
-	"os"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -28,20 +30,17 @@ type APIServer struct {
 	clients     map[*websocket.Conn]struct{}
 	mu          sync.Mutex
 	token       string
-	requireAuth bool
 	runtimeDir  string
 }
 
-// NewAPIServer wires up the control plane. The token is written to disk so a
-// future client can attach it as a Bearer header; enforcement is opt-in via
-// requireAuth so the MVP can ship without breaking the existing Swift client.
-// Loopback binding already protects against off-host attackers.
+// NewAPIServer wires up the control plane. The bearer token (written to
+// <runtimeDir>/api.token, 0600) is always required on /logs, /ws and /api/*:
+// loopback binding alone does not stop other local processes, or a browser
+// page via DNS rebinding / a LAN client via the proxy, from reaching the API.
 func NewAPIServer(proxyServer *proxy.ProxyServer, token, runtimeDir string) *APIServer {
-	requireAuth := os.Getenv("PACKETPEEK_AUTH") == "required"
 	return &APIServer{
 		proxyServer: proxyServer,
 		token:       token,
-		requireAuth: requireAuth,
 		runtimeDir:  runtimeDir,
 		clients:     make(map[*websocket.Conn]struct{}),
 		upgrader: websocket.Upgrader{
@@ -76,9 +75,11 @@ func (s *APIServer) HTTPServer(addr string) *http.Server {
 	mux.Handle("/api/mocks", s.auth(http.HandlerFunc(s.handleMocks)))
 	mux.Handle("/api/mocks/", s.auth(http.HandlerFunc(s.handleMockByID)))
 
+	_, port, _ := net.SplitHostPort(addr)
+	handler := checkHost(port, checkOrigin(jsonContentTypeOnPost(noStoreHeaders(mux))))
 	return &http.Server{
 		Addr:              addr,
-		Handler:           jsonContentTypeOnPost(noStoreHeaders(mux)),
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      0, // 0 → WS-friendly; per-handler timeouts apply
@@ -89,15 +90,10 @@ func (s *APIServer) HTTPServer(addr string) *http.Server {
 // auth is the bearer-token middleware. Accepts the token either via the
 // Authorization: Bearer <token> header or a ?token= query param (the latter
 // is needed for the WebSocket handshake, where JS clients can't set headers).
-// Bypassed entirely when requireAuth=false (default), at which point we still
-// generate and write the token so clients can opt in.
 func (s *APIServer) auth(next http.Handler) http.Handler {
-	if !s.requireAuth {
-		return next
-	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got := bearerFromRequest(r)
-		if !constTimeEqual(got, s.token) {
+		if s.token == "" || !constTimeEqual(got, s.token) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -119,19 +115,55 @@ func constTimeEqual(a, b string) bool {
 	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
 
-// allowLoopbackOrigin lets WS connections through only when the Origin header is
-// empty (native clients), missing, or points at a loopback address.
+func isLoopbackHostname(h string) bool {
+	switch strings.ToLower(h) {
+	case "127.0.0.1", "localhost", "::1":
+		return true
+	}
+	return false
+}
+
+// allowLoopbackOrigin accepts a missing Origin (native clients such as
+// ProxyApp's URLSession) or an origin whose host is exactly a loopback name.
+// The host is parsed, not prefix-matched: "http://localhost.evil.com" and
+// "http://127.0.0.1.nip.io" are rejected. "null" (sandboxed iframes, file://)
+// is rejected too.
 func allowLoopbackOrigin(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
 		return true
 	}
-	o := strings.ToLower(origin)
-	return strings.HasPrefix(o, "http://127.0.0.1") ||
-		strings.HasPrefix(o, "http://localhost") ||
-		strings.HasPrefix(o, "https://127.0.0.1") ||
-		strings.HasPrefix(o, "https://localhost") ||
-		strings.HasPrefix(o, "file://")
+	u, err := url.Parse(origin)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return false
+	}
+	return isLoopbackHostname(u.Hostname())
+}
+
+// checkOrigin applies allowLoopbackOrigin to every request, not just the WS
+// upgrade, so a web page can't drive the REST API cross-origin.
+func checkOrigin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !allowLoopbackOrigin(r) {
+			http.Error(w, "forbidden origin", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// checkHost rejects requests whose Host header isn't a loopback name on the
+// API port. A DNS-rebinding page (evil.com → 127.0.0.1) still sends
+// "Host: evil.com:8081", so it is refused here.
+func checkHost(port string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host, p, err := net.SplitHostPort(r.Host)
+		if err != nil || p != port || !isLoopbackHostname(host) {
+			http.Error(w, "forbidden host", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func noStoreHeaders(next http.Handler) http.Handler {
@@ -142,18 +174,17 @@ func noStoreHeaders(next http.Handler) http.Handler {
 	})
 }
 
+// jsonContentTypeOnPost caps write bodies and requires Content-Type
+// application/json on them. A browser can't send that cross-origin without a
+// CORS preflight (which we never approve), so "simple" form/text POSTs are out.
 func jsonContentTypeOnPost(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Cap POST/PUT/DELETE bodies. Cheap and avoids surprises.
 		if r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch {
 			r.Body = http.MaxBytesReader(w, r.Body, maxJSONBody)
-			if ct := r.Header.Get("Content-Type"); ct != "" && !strings.HasPrefix(ct, "application/json") {
-				// Allow form/text bodies through for now, but log noisy mismatches.
-				if !strings.HasPrefix(ct, "application/x-www-form-urlencoded") &&
-					!strings.HasPrefix(ct, "text/") {
-					http.Error(w, "expected application/json", http.StatusUnsupportedMediaType)
-					return
-				}
+			mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+			if err != nil || mt != "application/json" {
+				http.Error(w, "expected application/json", http.StatusUnsupportedMediaType)
+				return
 			}
 		}
 		next.ServeHTTP(w, r)

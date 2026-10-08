@@ -21,7 +21,7 @@ struct TutorialModalView: View {
             ),
             TutorialSlide(
                 title: "2. Verifica la Connessione",
-                description: "Apri il browser e vai su:\n\n\(ip):8081/welcome\n\nSe il proxy è attivo, vedrai una pagina con:\n\n\"Server proxy connesso\"\n\ne due pulsanti per scaricare i certificati.",
+                description: "Apri il browser e vai su:\n\n\(ip):8080/welcome\n\nSe il proxy è attivo, vedrai una pagina con:\n\n\"Server proxy connesso\"\n\ne due pulsanti per scaricare i certificati.",
                 systemImage: "link"
             ),
             TutorialSlide(

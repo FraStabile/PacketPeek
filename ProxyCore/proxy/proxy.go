@@ -85,10 +85,11 @@ func NewProxyServer(certManager *cert.CertManager, runtimeDir string) *ProxyServ
 func newUpstreamTransport() *http.Transport {
 	return &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
+		// Refuses loopback / control-port targets after DNS resolution (see target_guard.go).
+		DialContext: guardedDialContext(&net.Dialer{
 			Timeout:   upstreamDialTimeout,
 			KeepAlive: 30 * time.Second,
-		}).DialContext,
+		}),
 		TLSHandshakeTimeout:   upstreamTLSHandshake,
 		ResponseHeaderTimeout: upstreamResponseHeader,
 		IdleConnTimeout:       upstreamIdleConn,
@@ -190,6 +191,21 @@ func (p *ProxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		logEntry.AppIdentifier = bundleID
 	} else if bundleID := r.Header.Get("CFBundleIdentifier"); bundleID != "" {
 		logEntry.AppIdentifier = bundleID
+	}
+
+	target, defaultPort := r.URL.Host, "80"
+	if r.Method == http.MethodConnect {
+		defaultPort = "443"
+	}
+	if target == "" {
+		target = r.Host
+	}
+	if err := checkTarget(target, defaultPort); err != nil {
+		log.Printf("Refused %s to %s from %s: %v", r.Method, sanitizeLogValue(target), sanitizeLogValue(r.RemoteAddr), err)
+		logEntry.StatusCode = http.StatusForbidden
+		p.addLog(logEntry)
+		http.Error(w, err.Error(), http.StatusForbidden)
+		return
 	}
 
 	if r.Method == http.MethodConnect {
