@@ -132,6 +132,14 @@ func (m *MockManager) AddMock(mock MockResponse) error {
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// Upsert: an edit from the app carries the existing id, so replace by id
+	// first; otherwise replace the rule with the same method + path + host.
+	for i, existing := range m.mocks {
+		if existing.ID == mock.ID {
+			m.mocks[i] = c
+			return m.saveToFileLocked()
+		}
+	}
 	for i, existing := range m.mocks {
 		if strings.EqualFold(existing.Method, mock.Method) &&
 			existing.Path == mock.Path &&

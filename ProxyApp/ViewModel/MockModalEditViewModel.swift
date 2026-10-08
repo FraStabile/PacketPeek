@@ -39,37 +39,107 @@ class MockModalEditViewModel: BaseViewModel {
 
     @InjectProps private var repo: MocksAPI
     @Published var statusCode: String = ""
-    
+    @Published var errorMessage: String?
+    @Published private(set) var isSaving = false
+
+    /// The mock being edited, when opened from the mock manager. Its identity
+    /// and flags (id, isActive, isRegex, contentType, host, path) are preserved
+    /// on save; nil when creating a new mock from a captured request.
+    private var existingMock: MockItemRequest?
+
     func dismiss() {
         isPresented = false
     }
-    
+
+    /// Prepare the sheet to create a new mock from a captured request.
     func setupProxyLog(proxyLog: ProxyLog) {
-        self.log = proxyLog
-        self.response = log.responseBody ?? ""
-        self.statusCode = String(proxyLog.statusCode)
+        existingMock = nil
+        log = proxyLog
+        response = proxyLog.responseBody ?? ""
+        statusCode = String(proxyLog.statusCode)
+        latency = "0"
+        errorMessage = nil
     }
-    
-    
-    @MainActor
-    func setupMocks() async {
-        // Hostname only: the daemon matches mocks by hostname, ignoring the port.
-        let host = log.url.host
-        let requestData = MockItemRequest(
-            method: log.method,
-            host: host,
-            path: log.url.path,
-            isRegex: false,
-            statusCode: Int(statusCode) ?? 0,
-            latencyMS: Int(latency) ?? 0,
-            response: response.trim(),
-            contentType: "application/json",
-            isActive: true
+
+    /// Prepare the sheet to edit an existing mock.
+    func setupMock(_ mock: MockItemRequest) {
+        existingMock = mock
+        log = ProxyLog(
+            method: mock.method,
+            url: "https://" + mock.host + mock.path,
+            statusCode: mock.statusCode,
+            responseBody: mock.response,
+            responseTime: Double(mock.latencyMS)
         )
+        response = mock.response
+        statusCode = String(mock.statusCode)
+        latency = String(mock.latencyMS)
+        errorMessage = nil
+    }
+
+    /// Validates the form and returns the field values, or sets errorMessage.
+    private func validatedInput() -> (status: Int, latency: Int)? {
+        guard let status = Int(statusCode.trim()), (100...599).contains(status) else {
+            errorMessage = "Status code non valido: inserisci un numero tra 100 e 599."
+            return nil
+        }
+        let latencyText = latency.trim()
+        guard let latencyMS = latencyText.isEmpty ? 0 : Int(latencyText), latencyMS >= 0 else {
+            errorMessage = "Latenza non valida: inserisci un numero di millisecondi ≥ 0."
+            return nil
+        }
+        return (status, latencyMS)
+    }
+
+    private var contentTypeForNewMock: String {
+        let header = log.responseHeaders.first { $0.key.lowercased() == "content-type" }?.value
+        return header?.isEmpty == false ? header! : "application/json"
+    }
+
+    /// Saves the mock. Returns true on success; on failure errorMessage is set
+    /// and the sheet should stay open.
+    @MainActor
+    func save() async -> Bool {
+        errorMessage = nil
+        guard let input = validatedInput() else { return false }
+
+        let requestData: MockItemRequest
+        if let existing = existingMock {
+            requestData = MockItemRequest(
+                method: existing.method,
+                host: existing.host,
+                path: existing.path,
+                isRegex: existing.isRegex,
+                statusCode: input.status,
+                latencyMS: input.latency,
+                response: response.trim(),
+                contentType: existing.contentType,
+                isActive: existing.isActive,
+                id: existing.id
+            )
+        } else {
+            requestData = MockItemRequest(
+                method: log.method,
+                // Hostname only: the daemon matches mocks by hostname, ignoring the port.
+                host: log.url.host,
+                path: log.url.path,
+                isRegex: false,
+                statusCode: input.status,
+                latencyMS: input.latency,
+                response: response.trim(),
+                contentType: contentTypeForNewMock,
+                isActive: true
+            )
+        }
+
+        isSaving = true
+        defer { isSaving = false }
         do {
             try await repo.updateMock(requestData)
+            return true
         } catch {
-            print("Failed to save mock:", error)
+            errorMessage = "Salvataggio non riuscito: \(error.localizedDescription)"
+            return false
         }
     }
 }

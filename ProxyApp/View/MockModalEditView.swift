@@ -93,7 +93,13 @@ struct MockModalEditView: View {
             }
             
             Spacer()
-            
+
+            if let error = viewModel.errorMessage {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.subheadline)
+                    .foregroundStyle(.red)
+            }
+
             HStack(spacing: 16) {
                 Button(action: {
                     modalRouter.activeModal = nil
@@ -108,8 +114,10 @@ struct MockModalEditView: View {
                 
                 Button(action: {
                     Task {
-                        await viewModel.setupMocks()
-                        modalRouter.activeModal = nil
+                        // Keep the sheet open on failure so the error is visible.
+                        if await viewModel.save() {
+                            modalRouter.activeModal = nil
+                        }
                     }
                 }) {
                     Label("Salva", systemImage: "checkmark")
@@ -117,6 +125,7 @@ struct MockModalEditView: View {
                         .padding(.vertical, 8)
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(viewModel.isSaving)
             }
             .padding(.top)
         }

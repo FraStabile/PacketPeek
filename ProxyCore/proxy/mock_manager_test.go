@@ -139,3 +139,26 @@ func TestHTTPSMockServedWithLatencyAndLogged(t *testing.T) {
 		t.Errorf("JSON lacks mocked flag: %s", raw)
 	}
 }
+
+func TestAddMockUpsertsByID(t *testing.T) {
+	mm := newTestMockManager(t, MockResponse{ID: "m1", Method: "GET", Host: "a.test", Path: "/x", IsRegex: false, ContentType: "text/plain", IsActive: false, StatusCode: 200})
+
+	// The edit sheet resends the same id with new status/latency.
+	edited := MockResponse{ID: "m1", Method: "GET", Host: "a.test", Path: "/x", ContentType: "text/plain", IsActive: false, StatusCode: 503, LatencyMs: 50}
+	if err := mm.AddMock(edited); err != nil {
+		t.Fatal(err)
+	}
+	list := mm.ListMocks()
+	if len(list) != 1 {
+		t.Fatalf("got %d mocks, want 1 (edit must not duplicate)", len(list))
+	}
+	if got := list[0]; got.StatusCode != 503 || got.LatencyMs != 50 || got.IsActive || got.ContentType != "text/plain" {
+		t.Fatalf("edit not applied / flags lost: %+v", got)
+	}
+
+	// Persisted to disk.
+	reloaded := NewMockManager(mm.file)
+	if l := reloaded.ListMocks(); len(l) != 1 || l[0].StatusCode != 503 {
+		t.Fatalf("not persisted: %+v", l)
+	}
+}
