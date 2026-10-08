@@ -53,10 +53,8 @@ class MockModalEditViewModel: BaseViewModel {
     
     @MainActor
     func setupMocks() async {
-        var host = log.url.host
-        if let port = log.url.port {
-            host += ":\(port)"
-        }
+        // Hostname only: the daemon matches mocks by hostname, ignoring the port.
+        let host = log.url.host
         let requestData = MockItemRequest(
             method: log.method,
             host: host,

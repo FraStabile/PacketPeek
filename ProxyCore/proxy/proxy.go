@@ -53,6 +53,10 @@ type RequestLog struct {
 	DeviceInfo    string `json:"device_info,omitempty"`
 	IsSimulator   bool   `json:"is_simulator"`
 	AppIdentifier string `json:"app_identifier,omitempty"`
+
+	// Mocked is true when the response was synthesized from a mock rule and
+	// the request never reached the real server.
+	Mocked bool `json:"mocked"`
 }
 
 type ProxyServer struct {
@@ -224,7 +228,7 @@ func (p *ProxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	reqEncoding := r.Header.Get("Content-Encoding")
 
 	// Plain HTTP mock interception (CONNECT path handles HTTPS separately).
-	if mockResp, _ := p.mockManager.Match(r.Method, r.Host, r.URL.RequestURI()); mockResp != nil {
+	if mockResp, _ := p.mockManager.Match(r.Method, hostnameOnly(r.Host), r.URL); mockResp != nil {
 		captureAndDrain(r.Body, reqBody)
 		logEntry.RequestBody = reqBody.String(reqEncoding)
 		p.serveMockHTTP(w, mockResp, &logEntry)
@@ -299,23 +303,15 @@ func (p *ProxyServer) serveLocalAsset(w http.ResponseWriter, r *http.Request) bo
 // serveMockHTTP frames a mocked response correctly via http.Response.Write
 // (no manual byte construction = no CRLF injection / smuggling risk).
 func (p *ProxyServer) serveMockHTTP(w http.ResponseWriter, m *MockResponse, entry *RequestLog) {
-	if m.LatencyMs > 0 {
-		time.Sleep(time.Duration(m.LatencyMs) * time.Millisecond)
-	}
-	ct := m.ContentType
-	if ct == "" {
-		ct = "application/json"
-	}
+	m.Delay()
+	ct := m.EffectiveContentType()
 	w.Header().Set("Content-Type", ct)
 	w.Header().Set("X-Mock-Response", "true")
-	if m.StatusCode == 0 {
-		w.WriteHeader(http.StatusOK)
-	} else {
-		w.WriteHeader(m.StatusCode)
-	}
+	w.WriteHeader(m.EffectiveStatus())
 	_, _ = w.Write([]byte(m.Response))
 
-	entry.StatusCode = m.StatusCode
+	entry.Mocked = true
+	entry.StatusCode = m.EffectiveStatus()
 	entry.ResponseHeaders = map[string]string{
 		"Content-Type":    ct,
 		"X-Mock-Response": "true",
@@ -438,14 +434,16 @@ func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 		reqBody := newHeadBuffer()
 		reqEncoding := req.Header.Get("Content-Encoding")
 
-		// Mock match uses method + host + path?query.
-		if mockResp, _ := p.mockManager.Match(req.Method, r.Host, req.URL.RequestURI()); mockResp != nil {
+		// Mock match: method + hostname (no port) + path; see MockManager.Match.
+		if mockResp, _ := p.mockManager.Match(req.Method, hostnameOnly(r.Host), req.URL); mockResp != nil {
 			// Consume the body so the next request on this connection parses cleanly.
 			captureAndDrain(req.Body, reqBody)
 			reqLog.RequestBody = reqBody.String(reqEncoding)
+			mockResp.Delay()
 			writeMockToTLSConn(tlsConn, mockResp)
-			reqLog.StatusCode = mockResp.StatusCode
-			reqLog.ResponseHeaders = map[string]string{"X-Mock-Response": "true", "Content-Type": mockResp.ContentType}
+			reqLog.Mocked = true
+			reqLog.StatusCode = mockResp.EffectiveStatus()
+			reqLog.ResponseHeaders = map[string]string{"X-Mock-Response": "true", "Content-Type": mockResp.EffectiveContentType()}
 			reqLog.ResponseBody = mockResp.Response
 			reqLog.Completed = time.Now()
 			reqLog.ResponseTime = reqLog.Completed.Sub(reqLog.Timestamp)
@@ -536,14 +534,7 @@ func writeBadGateway(conn *tls.Conn, cause error) {
 // CRLF / header-injection from attacker-controlled body or content-type.
 func writeMockToTLSConn(conn *tls.Conn, m *MockResponse) {
 	body := []byte(m.Response)
-	ct := m.ContentType
-	if ct == "" {
-		ct = "application/json"
-	}
-	status := m.StatusCode
-	if status == 0 {
-		status = http.StatusOK
-	}
+	status := m.EffectiveStatus()
 	resp := &http.Response{
 		Status:        fmt.Sprintf("%d %s", status, http.StatusText(status)),
 		StatusCode:    status,
@@ -553,7 +544,7 @@ func writeMockToTLSConn(conn *tls.Conn, m *MockResponse) {
 		Body:          io.NopCloser(bytes.NewReader(body)),
 		ContentLength: int64(len(body)),
 		Header: http.Header{
-			"Content-Type":    []string{ct},
+			"Content-Type":    []string{m.EffectiveContentType()},
 			"X-Mock-Response": []string{"true"},
 		},
 	}
