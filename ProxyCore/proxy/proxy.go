@@ -27,10 +27,10 @@ const (
 
 	// Upstream transport timeouts. Generous so SSE/streaming requests survive,
 	// strict enough that a dead upstream releases the goroutine.
-	upstreamDialTimeout      = 10 * time.Second
-	upstreamTLSHandshake     = 10 * time.Second
-	upstreamResponseHeader   = 60 * time.Second
-	upstreamIdleConn         = 90 * time.Second
+	upstreamDialTimeout    = 10 * time.Second
+	upstreamTLSHandshake   = 10 * time.Second
+	upstreamResponseHeader = 60 * time.Second
+	upstreamIdleConn       = 90 * time.Second
 )
 
 type RequestLog struct {
@@ -66,6 +66,9 @@ type ProxyServer struct {
 	runtimeDir  string
 
 	upstream *http.Transport
+	// allowLoopbackTargets disables checkTarget. Tests only: their upstreams
+	// are httptest servers on 127.0.0.1.
+	allowLoopbackTargets bool
 }
 
 func NewProxyServer(certManager *cert.CertManager, runtimeDir string) *ProxyServer {
@@ -101,9 +104,16 @@ func newUpstreamTransport() *http.Transport {
 	}
 }
 
-func (p *ProxyServer) MockManager() *MockManager           { return p.mockManager }
-func (p *ProxyServer) AppsManager() *MonitoredAppsManager  { return p.appsManager }
-func (p *ProxyServer) CertManager() *cert.CertManager      { return p.certManager }
+func (p *ProxyServer) checkTarget(hostport, defaultPort string) error {
+	if p.allowLoopbackTargets {
+		return nil
+	}
+	return checkTarget(hostport, defaultPort)
+}
+
+func (p *ProxyServer) MockManager() *MockManager          { return p.mockManager }
+func (p *ProxyServer) AppsManager() *MonitoredAppsManager { return p.appsManager }
+func (p *ProxyServer) CertManager() *cert.CertManager     { return p.certManager }
 
 func (p *ProxyServer) Subscribe() chan RequestLog {
 	ch := make(chan RequestLog, 64)
@@ -158,14 +168,6 @@ func sanitizeLogValue(s string) string {
 	return r.Replace(s)
 }
 
-// truncateForLog caps a string at maxLoggedBodyBytes for the log copy.
-func truncateForLog(b []byte) string {
-	if len(b) <= maxLoggedBodyBytes {
-		return string(b)
-	}
-	return string(b[:maxLoggedBodyBytes]) + fmt.Sprintf("\n…[truncated %d bytes]", len(b)-maxLoggedBodyBytes)
-}
-
 func (p *ProxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Serve the cert / welcome endpoints when a phone hits the proxy port
 	// (the API control plane is loopback-only, so this is the LAN-reachable surface).
@@ -200,7 +202,7 @@ func (p *ProxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if target == "" {
 		target = r.Host
 	}
-	if err := checkTarget(target, defaultPort); err != nil {
+	if err := p.checkTarget(target, defaultPort); err != nil {
 		log.Printf("Refused %s to %s from %s: %v", r.Method, sanitizeLogValue(target), sanitizeLogValue(r.RemoteAddr), err)
 		logEntry.StatusCode = http.StatusForbidden
 		p.addLog(logEntry)
@@ -213,21 +215,18 @@ func (p *ProxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Capture request body for logging (cap at maxLoggedBodyBytes).
-	if r.Body != nil {
-		body, err := io.ReadAll(r.Body)
-		if err == nil && len(body) > 0 {
-			logEntry.RequestBody = truncateForLog(body)
-			r.Body = io.NopCloser(bytes.NewBuffer(body))
-		}
-	}
-
 	for k, v := range r.Header {
 		logEntry.RequestHeaders[k] = strings.Join(v, ", ")
 	}
 
+	// Request body: streamed upstream, only the first maxLoggedBodyBytes are kept for the log.
+	reqBody := newHeadBuffer()
+	reqEncoding := r.Header.Get("Content-Encoding")
+
 	// Plain HTTP mock interception (CONNECT path handles HTTPS separately).
 	if mockResp, _ := p.mockManager.Match(r.Method, r.Host, r.URL.RequestURI()); mockResp != nil {
+		captureAndDrain(r.Body, reqBody)
+		logEntry.RequestBody = reqBody.String(reqEncoding)
 		p.serveMockHTTP(w, mockResp, &logEntry)
 		return
 	}
@@ -241,8 +240,12 @@ func (p *ProxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if outReq.URL.Host == "" {
 		outReq.URL.Host = r.Host
 	}
+	if r.Body != nil && r.Body != http.NoBody {
+		outReq.Body = teeBody(r.Body, reqBody)
+	}
 
 	resp, err := p.upstream.RoundTrip(outReq)
+	logEntry.RequestBody = reqBody.String(reqEncoding)
 	if err != nil {
 		logEntry.StatusCode = http.StatusBadGateway
 		p.addLog(logEntry)
@@ -260,22 +263,10 @@ func (p *ProxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(resp.StatusCode)
 	logEntry.StatusCode = resp.StatusCode
 
-	// Tee the body to the client and (truncated) to the log.
-	var logBuf bytes.Buffer
-	limited := io.LimitReader(resp.Body, maxLoggedBodyBytes+1)
-	tee := io.TeeReader(limited, &logBuf)
-	if _, err := io.Copy(w, tee); err != nil {
-		// client likely went away; we keep what we logged so far
-	}
-	if logBuf.Len() > maxLoggedBodyBytes {
-		logEntry.ResponseBody = truncateForLog(logBuf.Bytes())
-	} else {
-		logEntry.ResponseBody = decodeIfGzip(resp.Header.Get("Content-Encoding"), logBuf.Bytes())
-	}
-
-	// If the body was larger than the limit, drain the remaining bytes to the client
-	// without buffering further into the log.
-	_, _ = io.Copy(w, resp.Body)
+	// Stream to the client (flushing each chunk, for SSE), keeping a bounded copy for the log.
+	respBody := newHeadBuffer()
+	_, _ = io.Copy(newFlushWriter(w), io.TeeReader(resp.Body, respBody))
+	logEntry.ResponseBody = respBody.String(resp.Header.Get("Content-Encoding"))
 
 	logEntry.Completed = time.Now()
 	logEntry.ResponseTime = logEntry.Completed.Sub(logEntry.Timestamp)
@@ -344,8 +335,10 @@ func decodeIfGzip(encoding string, body []byte) string {
 		return string(body)
 	}
 	defer gz.Close()
+	// The captured body may be truncated, so a short read is expected: keep
+	// whatever decoded cleanly.
 	out, err := io.ReadAll(io.LimitReader(gz, maxLoggedBodyBytes))
-	if err != nil {
+	if err != nil && len(out) == 0 {
 		return string(body)
 	}
 	return string(out)
@@ -416,10 +409,6 @@ func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 	defer tlsConn.Close()
 
 	reader := bufio.NewReader(tlsConn)
-	client := &http.Client{
-		Transport: p.upstream,
-		Timeout:   2 * time.Minute,
-	}
 
 	for {
 		req, err := http.ReadRequest(reader)
@@ -446,26 +435,14 @@ func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 			reqLog.RequestHeaders[k] = strings.Join(v, ", ")
 		}
 
-		var bodyBytes []byte
-		if req.Body != nil {
-			bodyBytes, _ = io.ReadAll(req.Body)
-			req.Body.Close()
-			if len(bodyBytes) > 0 {
-				logged := bodyBytes
-				if ct := req.Header.Get("Content-Encoding"); strings.Contains(strings.ToLower(ct), "gzip") {
-					if gz, err := gzip.NewReader(bytes.NewReader(bodyBytes)); err == nil {
-						if decoded, err := io.ReadAll(io.LimitReader(gz, maxLoggedBodyBytes)); err == nil {
-							logged = decoded
-						}
-						gz.Close()
-					}
-				}
-				reqLog.RequestBody = truncateForLog(logged)
-			}
-		}
+		reqBody := newHeadBuffer()
+		reqEncoding := req.Header.Get("Content-Encoding")
 
 		// Mock match uses method + host + path?query.
 		if mockResp, _ := p.mockManager.Match(req.Method, r.Host, req.URL.RequestURI()); mockResp != nil {
+			// Consume the body so the next request on this connection parses cleanly.
+			captureAndDrain(req.Body, reqBody)
+			reqLog.RequestBody = reqBody.String(reqEncoding)
 			writeMockToTLSConn(tlsConn, mockResp)
 			reqLog.StatusCode = mockResp.StatusCode
 			reqLog.ResponseHeaders = map[string]string{"X-Mock-Response": "true", "Content-Type": mockResp.ContentType}
@@ -476,13 +453,19 @@ func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
+		// The request body is streamed upstream (never fully buffered).
+		var body io.ReadCloser = http.NoBody
+		if req.ContentLength != 0 {
+			body = teeBody(req.Body, reqBody)
+		}
 		outURL := "https://" + r.Host + req.URL.RequestURI()
-		outReq, err := http.NewRequestWithContext(req.Context(), req.Method, outURL, bytes.NewReader(bodyBytes))
+		outReq, err := http.NewRequestWithContext(req.Context(), req.Method, outURL, body)
 		if err != nil {
 			reqLog.StatusCode = http.StatusBadGateway
 			p.addLog(reqLog)
-			continue
+			return
 		}
+		outReq.ContentLength = req.ContentLength // -1 when the client sent chunked
 		// Copy request headers, but strip hop-by-hop entries.
 		for k, v := range req.Header {
 			if isHopHeader(k) {
@@ -491,11 +474,16 @@ func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 			outReq.Header[k] = v
 		}
 
-		resp, err := client.Do(outReq)
+		// RoundTrip, not http.Client: no total timeout (would kill long
+		// downloads / SSE; the transport's dial/TLS/header timeouts still
+		// apply) and no redirect following (the client must see the 3xx).
+		resp, err := p.upstream.RoundTrip(outReq)
+		reqLog.RequestBody = reqBody.String(reqEncoding)
 		if err != nil {
 			reqLog.StatusCode = http.StatusBadGateway
 			p.addLog(reqLog)
-			continue
+			writeBadGateway(tlsConn, err)
+			return
 		}
 
 		reqLog.StatusCode = resp.StatusCode
@@ -503,28 +491,45 @@ func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 			reqLog.ResponseHeaders[k] = strings.Join(v, ", ")
 		}
 
-		// Buffer the response for logging (bounded), then forward original bytes verbatim.
-		respBytes, _ := io.ReadAll(resp.Body)
+		// Stream the response to the client as it arrives. resp.Write keeps
+		// upstream framing (Content-Length, chunked, or close-delimited) and
+		// copies the body chunk by chunk; tls.Conn writes are not buffered,
+		// so chunked / SSE bodies reach the client immediately. A bounded
+		// copy goes to the log via the tee.
+		respBody := newHeadBuffer()
+		resp.Body = teeBody(resp.Body, respBody)
+		writeErr := resp.Write(tlsConn)
 		resp.Body.Close()
-		logged := respBytes
-		if len(respBytes) > maxLoggedBodyBytes {
-			logged = respBytes[:maxLoggedBodyBytes]
-		}
-		reqLog.ResponseBody = decodeIfGzip(resp.Header.Get("Content-Encoding"), logged)
-
-		// Reassemble a response and write it back to the TLS tunnel.
-		resp.Body = io.NopCloser(bytes.NewReader(respBytes))
-		resp.ContentLength = int64(len(respBytes))
-		if err := resp.Write(tlsConn); err != nil {
-			log.Printf("Error writing tunneled response: %v", sanitizeError(err))
-			p.addLog(reqLog)
-			return
-		}
-
+		reqLog.ResponseBody = respBody.String(resp.Header.Get("Content-Encoding"))
 		reqLog.Completed = time.Now()
 		reqLog.ResponseTime = reqLog.Completed.Sub(reqLog.Timestamp)
 		p.addLog(reqLog)
+
+		if writeErr != nil {
+			log.Printf("Error writing tunneled response: %v", sanitizeError(writeErr))
+			return
+		}
+		// Close-delimited response (or Connection: close): the tunnel ends here.
+		if resp.Close || req.Close {
+			return
+		}
 	}
+}
+
+// writeBadGateway answers a tunneled request whose upstream failed, so the
+// client gets a response instead of a silently dropped connection.
+func writeBadGateway(conn *tls.Conn, cause error) {
+	body := []byte("upstream error: " + sanitizeError(cause))
+	resp := &http.Response{
+		StatusCode:    http.StatusBadGateway,
+		ProtoMajor:    1,
+		ProtoMinor:    1,
+		Close:         true,
+		ContentLength: int64(len(body)),
+		Body:          io.NopCloser(bytes.NewReader(body)),
+		Header:        http.Header{"Content-Type": []string{"text/plain; charset=utf-8"}},
+	}
+	_ = resp.Write(conn)
 }
 
 // writeMockToTLSConn frames a mock response via http.Response.Write to avoid
