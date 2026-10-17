@@ -12,6 +12,8 @@ import SwiftUI
 struct ProxyStatusPill: View {
     let isRunning: Bool
     let localIP: String?
+    /// True when the daemon shut itself down after the idle timeout.
+    var stoppedIdle: Bool = false
 
     @State private var copied: Bool = false
 
@@ -84,7 +86,7 @@ struct ProxyStatusPill: View {
                 }
             }
         } else {
-            Text("Proxy offline")
+            Text(stoppedIdle ? "Stopped (idle)" : "Proxy offline")
                 .font(Typography.caption)
                 .foregroundStyle(Surface.secondaryText)
         }
@@ -99,13 +101,14 @@ struct ProxyStatusPill: View {
     }
 
     private var helpText: String {
-        isRunning
-        ? "Proxy running. Click to copy endpoint."
-        : "Proxy is not running. Press Play to start."
+        if isRunning { return "Proxy running. Click to copy endpoint." }
+        if stoppedIdle { return "Proxy stopped after 5 minutes without traffic. Press Play to restart." }
+        return "Proxy is not running. Press Play to start."
     }
 
     private var accessibilityLabel: String {
-        isRunning ? "Proxy running on \(primaryCopyValue ?? "127.0.0.1:8080")" : "Proxy offline"
+        if isRunning { return "Proxy running on \(primaryCopyValue ?? "127.0.0.1:8080")" }
+        return stoppedIdle ? "Proxy stopped (idle)" : "Proxy offline"
     }
 
     private func copyToPasteboard(_ value: String) {

@@ -52,24 +52,7 @@ struct MockManagerView: View {
                         onEdit: {
                             selectedMock = mock
                             modalRouter.activeModal = .editMock
-                            editMock.setupProxyLog(proxyLog: ProxyLog(
-                                method: mock.method,
-                                url: "https://" + mock.host + mock.path,
-                                protocol: mock.method,
-                                clientIP: "",
-                                requestHeaders: [:],
-                                requestBody: "",
-                                statusCode: mock.statusCode,
-                                responseHeaders: [:],
-                                responseBody: mock.response,
-                                responseTime: Double(mock.latencyMS),
-                                timestamp: Date(),
-                                completed: Date(),
-                                userAgent: "",
-                                deviceInfo: "",
-                                isSimulator: true,
-                                appIdentifier: ""
-                            ))
+                            editMock.setupMock(mock)
                         },
                         onDelete: {
                             showDeleteAlert = mock

@@ -1,12 +1,14 @@
 package proxy
 
 import (
-	"context"
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -130,6 +132,14 @@ func (m *MockManager) AddMock(mock MockResponse) error {
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// Upsert: an edit from the app carries the existing id, so replace by id
+	// first; otherwise replace the rule with the same method + path + host.
+	for i, existing := range m.mocks {
+		if existing.ID == mock.ID {
+			m.mocks[i] = c
+			return m.saveToFileLocked()
+		}
+	}
 	for i, existing := range m.mocks {
 		if strings.EqualFold(existing.Method, mock.Method) &&
 			existing.Path == mock.Path &&
@@ -152,12 +162,26 @@ func (m *MockManager) ListMocks() []MockResponse {
 	return out
 }
 
-// Match returns the first matching mock for the given method+host+pathOrURI.
-// Pathish is whatever the caller has — it's matched as-is against mock.Path
-// (exact) or against the precompiled regex. Regex evaluation is bounded by
-// regexMatchTimeout to mitigate ReDoS.
-func (m *MockManager) Match(method, host, pathish string) (*MockResponse, bool) {
+// Match returns the first active mock for method + host + URL.
+//
+//   - Host: compared by hostname only, case-insensitively, on both sides. The
+//     port is ignored, so a mock for "api.example.com" matches the CONNECT
+//     target "api.example.com:443", and mocks saved as "host:port" still work.
+//     An empty mock host matches any host.
+//   - Exact mocks compare mock.Path with u.Path, i.e. without the query
+//     string: "/users" matches "/users?page=2".
+//   - Regex mocks are evaluated against u.RequestURI() (path + "?" + query),
+//     so a pattern can target query parameters when needed. Patterns aren't
+//     implicitly anchored: "^/users" matches "/users?page=2" too.
+//
+// Go's regexp is RE2 (linear time, no backtracking), so patterns can't ReDoS
+// and need no timeout.
+func (m *MockManager) Match(method, host string, u *url.URL) (*MockResponse, bool) {
+	if u == nil {
+		return nil, false
+	}
 	method = strings.ToUpper(method)
+	host = hostnameOnly(host)
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	for i := range m.mocks {
@@ -168,17 +192,16 @@ func (m *MockManager) Match(method, host, pathish string) (*MockResponse, bool) 
 		if strings.ToUpper(mock.Method) != method {
 			continue
 		}
-		if mock.Host != "" && mock.Host != host {
+		if mock.Host != "" && hostnameOnly(mock.Host) != host {
 			continue
 		}
+		var hit bool
 		if mock.IsRegex {
-			if mock.rx != nil && matchWithTimeout(mock.rx, pathish, regexMatchTimeout) {
-				resp := mock.MockResponse
-				return &resp, true
-			}
-			continue
+			hit = mock.rx != nil && mock.rx.MatchString(u.RequestURI())
+		} else {
+			hit = mock.Path == u.Path
 		}
-		if mock.Path == pathish {
+		if hit {
 			resp := mock.MockResponse
 			return &resp, true
 		}
@@ -186,24 +209,34 @@ func (m *MockManager) Match(method, host, pathish string) (*MockResponse, bool) 
 	return nil, false
 }
 
-const regexMatchTimeout = 50 * time.Millisecond
+// hostnameOnly lowercases h and strips any port and IPv6 brackets.
+func hostnameOnly(h string) string {
+	if host, _, err := net.SplitHostPort(h); err == nil {
+		h = host
+	}
+	return strings.ToLower(strings.TrimSuffix(strings.Trim(h, "[]"), "."))
+}
 
-// matchWithTimeout runs rx.MatchString in a goroutine; if it doesn't return within
-// timeout we treat it as no-match (best-effort ReDoS mitigation — Go's regexp is
-// linear by design but we keep the guard for safety against future pattern engines).
-func matchWithTimeout(rx *regexp.Regexp, s string, timeout time.Duration) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	done := make(chan bool, 1)
-	go func() {
-		done <- rx.MatchString(s)
-	}()
-	select {
-	case ok := <-done:
-		return ok
-	case <-ctx.Done():
-		log.Printf("regex match timed out after %v for pattern %q", timeout, rx.String())
-		return false
+// EffectiveStatus is the status code actually sent for a mock (0 means 200).
+func (m *MockResponse) EffectiveStatus() int {
+	if m.StatusCode == 0 {
+		return http.StatusOK
+	}
+	return m.StatusCode
+}
+
+// EffectiveContentType is the Content-Type actually sent for a mock.
+func (m *MockResponse) EffectiveContentType() string {
+	if m.ContentType == "" {
+		return "application/json"
+	}
+	return m.ContentType
+}
+
+// Delay sleeps for the mock's configured latency.
+func (m *MockResponse) Delay() {
+	if m.LatencyMs > 0 {
+		time.Sleep(time.Duration(m.LatencyMs) * time.Millisecond)
 	}
 }
 

@@ -22,6 +22,7 @@ struct ProxyLog: Codable, Hashable, Identifiable {
     var statusCode: Int
     var responseHeaders: [String: String]
     var responseBody: String?
+    /// Milliseconds (the daemon sends fractional ms in `response_time_ms`).
     var responseTime: Double
     var timestamp: Date
     var completed: Date
@@ -31,12 +32,15 @@ struct ProxyLog: Codable, Hashable, Identifiable {
     var deviceInfo: String?
     var isSimulator: Bool
     var appIdentifier: String?
+    /// True when the daemon answered from a mock rule (the real server was never hit).
+    var isMocked: Bool
 
     enum CodingKeys: String, CodingKey {
         case method, url, `protocol`, clientIP = "client_ip", requestHeaders = "request_headers", requestBody = "request_body"
         case statusCode = "status_code", responseHeaders = "response_headers", responseBody = "response_body"
         case responseTime = "response_time_ms", timestamp, completed
         case userAgent = "user_agent", deviceInfo = "device_info", isSimulator = "is_simulator", appIdentifier = "app_identifier"
+        case isMocked = "mocked"
     }
 
     /// Lenient decoder: every backend field is treated as optional so a partial /
@@ -79,6 +83,7 @@ struct ProxyLog: Codable, Hashable, Identifiable {
         self.deviceInfo    = try? container.decodeIfPresent(String.self, forKey: .deviceInfo)
         self.isSimulator   = (try? container.decodeIfPresent(Bool.self, forKey: .isSimulator)) ?? false
         self.appIdentifier = try? container.decodeIfPresent(String.self, forKey: .appIdentifier)
+        self.isMocked      = (try? container.decodeIfPresent(Bool.self, forKey: .isMocked)) ?? false
     }
 
     init(
@@ -97,7 +102,8 @@ struct ProxyLog: Codable, Hashable, Identifiable {
         userAgent: String? = nil,
         deviceInfo: String? = nil,
         isSimulator: Bool = false,
-        appIdentifier: String? = nil
+        appIdentifier: String? = nil,
+        isMocked: Bool = false
     ) {
         self.method = method
         self.url = url
@@ -115,5 +121,6 @@ struct ProxyLog: Codable, Hashable, Identifiable {
         self.deviceInfo = deviceInfo
         self.isSimulator = isSimulator
         self.appIdentifier = appIdentifier
+        self.isMocked = isMocked
     }
 }

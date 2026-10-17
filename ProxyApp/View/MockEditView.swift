@@ -109,8 +109,9 @@ struct MockEditView: View {
                 
                 Button(action: {
                     Task {
-                        await viewModel.setupMocks()
-                        modalRouter.activeModal = nil
+                        if await viewModel.save() {
+                            modalRouter.activeModal = nil
+                        }
                     }
                 }) {
                     Label("Salva", systemImage: "checkmark")

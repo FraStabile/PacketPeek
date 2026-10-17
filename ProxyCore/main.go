@@ -22,9 +22,14 @@ import (
 )
 
 const (
-	proxyAddr   = ":8080"            // proxy listens on all interfaces (devices on LAN need it)
-	apiAddr     = "127.0.0.1:8081"   // control plane: loopback only
+	proxyAddr   = ":8080"          // proxy listens on all interfaces (devices on LAN need it)
+	apiAddr     = "127.0.0.1:8081" // control plane: loopback only
 	idleTimeout = 5 * time.Minute
+	idlePoll    = 30 * time.Second
+
+	// exitCodeIdle is the process exit status after an idle shutdown. ProxyApp
+	// (ProxyCore.swift) matches on it to show "Stopped (idle)" instead of an error.
+	exitCodeIdle = 3
 )
 
 var (
@@ -123,17 +128,48 @@ func generateAPIToken() (string, error) {
 	return token, nil
 }
 
-func idleWatcher(shutdown func()) {
+// isIdle reports whether the daemon has had no activity for longer than timeout.
+// Open proxy requests/tunnels and connected UI WebSocket clients both count as
+// activity: as long as ProxyApp is attached the daemon must stay up.
+func isIdle(sinceLastActivity, timeout time.Duration, inFlight int64, wsClients int) bool {
+	return sinceLastActivity > timeout && inFlight == 0 && wsClients == 0
+}
+
+// idleWatcher polls every interval and calls onIdle once (then returns) when
+// the daemon is idle. It also returns when done is closed.
+func idleWatcher(interval, timeout time.Duration, wsClients func() int, onIdle func(), done <-chan struct{}) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
 	for {
-		time.Sleep(30 * time.Second)
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+		}
 		mu.Lock()
 		idle := time.Since(lastRequestTime)
 		mu.Unlock()
-		if idle > idleTimeout && atomic.LoadInt64(&inFlight) == 0 {
-			log.Printf("No requests for %v and no in-flight work, shutting down...", idleTimeout)
-			shutdown()
+		if isIdle(idle, timeout, atomic.LoadInt64(&inFlight), wsClients()) {
+			log.Printf("No activity for %v, no in-flight work and no UI clients, shutting down...", timeout)
+			onIdle()
 			return
 		}
+	}
+}
+
+// waitForShutdown blocks until a stop signal, an idle notification or a fatal
+// server error arrives, and returns the exit code the process should use.
+func waitForShutdown(sig <-chan os.Signal, idle <-chan struct{}, serveErr <-chan error) int {
+	select {
+	case s := <-sig:
+		log.Printf("Received %v, stopping daemon...", s)
+		return 0
+	case <-idle:
+		log.Println("Idle timeout reached, stopping daemon...")
+		return exitCodeIdle
+	case err := <-serveErr:
+		log.Printf("Server error: %v", err)
+		return 1
 	}
 }
 
@@ -149,16 +185,17 @@ func main() {
 	if err := writePID(); err != nil {
 		log.Fatalf("Unable to write PID file: %v", err)
 	}
-	defer removePID()
 
 	apiToken, err := generateAPIToken()
 	if err != nil {
+		removePID()
 		log.Fatalf("Unable to generate API token: %v", err)
 	}
 	log.Printf("API token written to %s", apiTokenFile)
 
 	certManager, err := cert.NewCertManager(runtimeDir())
 	if err != nil {
+		removePID()
 		log.Fatalf("Failed to create certificate manager: %v", err)
 	}
 	proxyServer := proxy.NewProxyServer(certManager, runtimeDir())
@@ -168,6 +205,8 @@ func main() {
 		updateLastRequestTime()
 		atomic.AddInt64(&inFlight, 1)
 		defer atomic.AddInt64(&inFlight, -1)
+		// Long-lived CONNECT tunnels: restart the idle clock when they end too.
+		defer updateLastRequestTime()
 		proxyServer.ServeHTTP(w, r)
 	})
 
@@ -178,36 +217,38 @@ func main() {
 	apiServer := api.NewAPIServer(proxyServer, apiToken, runtimeDir())
 	apiSrv := apiServer.HTTPServer(apiAddr)
 
-	updateLastRequestTime()
-	go idleWatcher(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = proxySrv.Shutdown(ctx)
-		_ = apiSrv.Shutdown(ctx)
-	})
-
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+	serveErr := make(chan error, 2)
 
 	go func() {
 		log.Printf("Starting proxy on %s", proxyAddr)
 		if err := proxySrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Proxy server error: %v", err)
+			serveErr <- fmt.Errorf("proxy server: %w", err)
 		}
 	}()
 
 	go func() {
 		log.Printf("Starting API on %s", apiAddr)
 		if err := apiSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("API server error: %v", err)
+			serveErr <- fmt.Errorf("API server: %w", err)
 		}
 	}()
 
-	<-stop
-	log.Println("Stopping daemon...")
+	updateLastRequestTime()
+	idle := make(chan struct{})
+	watcherDone := make(chan struct{})
+	go idleWatcher(idlePoll, idleTimeout, apiServer.ActiveClients, func() { close(idle) }, watcherDone)
+
+	code := waitForShutdown(stop, idle, serveErr)
+	close(watcherDone)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
 	_ = proxySrv.Shutdown(ctx)
 	_ = apiSrv.Shutdown(ctx)
-	log.Println("Daemon stopped cleanly")
+	cancel()
+	// os.Exit skips deferred calls, so clean up the PID file explicitly.
+	removePID()
+	log.Printf("Daemon stopped (exit code %d)", code)
+	os.Exit(code)
 }
