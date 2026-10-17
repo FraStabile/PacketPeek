@@ -21,3 +21,4 @@ xcuserdata/
 
 # --- Claude Code local workspace ---
 .claude/work/
+.claude/worktrees/
