@@ -189,3 +189,88 @@ func TestHTTPSDoesNotFollowRedirects(t *testing.T) {
 		t.Fatalf("status %d, want 302 passed through", resp.StatusCode)
 	}
 }
+
+// connectRaw opens a raw TCP connection to the proxy and sends CONNECT.
+func connectRaw(t *testing.T, front *httptest.Server) (net.Conn, *bufio.Reader) {
+	t.Helper()
+	conn, err := net.Dial("tcp", strings.TrimPrefix(front.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { conn.Close() })
+	io.WriteString(conn, "CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n")
+	br := bufio.NewReader(conn)
+	line, err := br.ReadString('\n')
+	if err != nil || !strings.Contains(line, "200") {
+		t.Fatalf("CONNECT reply = %q, %v", line, err)
+	}
+	for { // drain headers
+		l, err := br.ReadString('\n')
+		if err != nil || l == "\r\n" {
+			break
+		}
+	}
+	return conn, br
+}
+
+// waitClosed fails unless the server closes conn within d.
+func waitClosed(t *testing.T, conn net.Conn, br *bufio.Reader, d time.Duration) {
+	t.Helper()
+	conn.SetReadDeadline(time.Now().Add(d))
+	if _, err := br.ReadByte(); err == nil {
+		t.Fatal("unexpected data from proxy")
+	} else if ne, ok := err.(net.Error); ok && ne.Timeout() {
+		t.Fatal("silent tunnel not closed by the proxy in time")
+	}
+}
+
+func TestTunnelHandshakeTimeoutClosesSilentClient(t *testing.T) {
+	p, front := newTestProxy(t)
+	p.tunnelHandshakeTimeout = 200 * time.Millisecond
+	conn, br := connectRaw(t, front) // never starts the TLS handshake
+	waitClosed(t, conn, br, 3*time.Second)
+}
+
+func TestTunnelIdleTimeoutClosesKeepAliveClient(t *testing.T) {
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, "ok")
+	}))
+	t.Cleanup(upstream.Close)
+	p, front := newTestProxy(t)
+	p.upstream.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	p.tunnelIdleTimeout = 300 * time.Millisecond
+
+	host := strings.TrimPrefix(upstream.URL, "https://")
+	conn, err := net.Dial("tcp", strings.TrimPrefix(front.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	io.WriteString(conn, "CONNECT "+host+" HTTP/1.1\r\nHost: "+host+"\r\n\r\n")
+	br := bufio.NewReader(conn)
+	for {
+		l, err := br.ReadString('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		if l == "\r\n" {
+			break
+		}
+	}
+	tc := tls.Client(conn, &tls.Config{InsecureSkipVerify: true})
+	io.WriteString(tc, "GET / HTTP/1.1\r\nHost: "+host+"\r\n\r\n")
+	tbr := bufio.NewReader(tc)
+	resp, err := http.ReadResponse(tbr, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	// Keep-alive connection now idle: the proxy must close it.
+	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	if _, err := tbr.ReadByte(); err == nil {
+		t.Fatal("unexpected data")
+	} else if ne, ok := err.(net.Error); ok && ne.Timeout() {
+		t.Fatal("idle tunnel not closed by the proxy")
+	}
+}
