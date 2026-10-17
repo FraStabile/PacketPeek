@@ -35,8 +35,11 @@ final class ProxyCore: ObservableObject {
     private let executableName = "proxycore"
     private var goProcess: Process?
     private var webSocketTask: URLSessionWebSocketTask?
-    /// Max WebSocket frame size accepted from the daemon (16 MiB).
-    static let webSocketMaximumMessageSize = 16 * 1024 * 1024
+    /// Max WebSocket frame size accepted from the daemon (32 MiB).
+    /// URLSession's default is 1 MiB. Bodies are JSON strings capped at 1 MiB each (req + resp);
+    /// worst case JSON escaping is 6x (`\u00XX`), i.e. ~6 MiB per body, ~12 MiB total, plus
+    /// headers (not capped). 32 MiB leaves ample margin.
+    nonisolated static let webSocketMaximumMessageSize = 32 * 1024 * 1024
     private var session: URLSession
     private var reconnectTask: Task<Void, Never>?
     private var receiveLoopTask: Task<Void, Never>?
@@ -251,19 +254,26 @@ final class ProxyCore: ObservableObject {
             connectionState = .failed("Bad WebSocket URL")
             return
         }
-        var request = URLRequest(url: url)
-        if let token {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
-
-        let task = session.webSocketTask(with: request)
-        // Default is 1 MiB: a log with ~1 MiB req + resp bodies (base64 in JSON) would exceed it
-        // and drop the socket in a reconnect loop.
-        task.maximumMessageSize = Self.webSocketMaximumMessageSize
+        let task = Self.makeWebSocketTask(session: session, url: url, token: token)
         webSocketTask = task
         task.resume()
         connectionState = .connected
         await receiveLoop(task: task, attempt: attempt)
+    }
+
+    /// Builds the (not yet resumed) WebSocket task with auth header and the raised frame limit.
+    nonisolated static func makeWebSocketTask(
+        session: URLSession,
+        url: URL,
+        token: String?
+    ) -> URLSessionWebSocketTask {
+        var request = URLRequest(url: url)
+        if let token {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        let task = session.webSocketTask(with: request)
+        task.maximumMessageSize = webSocketMaximumMessageSize
+        return task
     }
 
     private func receiveLoop(task: URLSessionWebSocketTask, attempt: Int) async {
@@ -282,6 +292,7 @@ final class ProxyCore: ObservableObject {
                 }
             }
         } catch {
+            NSLog("[PacketPeek] WebSocket receive failed, reconnecting: \(error.localizedDescription) (\(error))")
             // Drop and retry. Cap attempts implicitly via backoff (max 30s).
             if isRunning {
                 scheduleReconnect(attempt: attempt + 1)
