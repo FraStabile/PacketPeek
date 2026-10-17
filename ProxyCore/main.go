@@ -27,15 +27,16 @@ const (
 	idleTimeout = 5 * time.Minute
 	idlePoll    = 30 * time.Second
 
-	proxyReadHeaderTimeout = 10 * time.Second
-	proxyIdleConnTimeout   = 2 * time.Minute
-
 	// exitCodeIdle is the process exit status after an idle shutdown. ProxyApp
 	// (ProxyCore.swift) matches on it to show "Stopped (idle)" instead of an error.
 	exitCodeIdle = 3
 )
 
 var (
+	// Variables (not consts) so tests can shorten them.
+	proxyReadHeaderTimeout = 10 * time.Second
+	proxyIdleConnTimeout   = 2 * time.Minute
+
 	pidFile         string
 	apiTokenFile    string
 	lastRequestTime time.Time
@@ -176,6 +177,20 @@ func waitForShutdown(sig <-chan os.Signal, idle <-chan struct{}, serveErr <-chan
 	}
 }
 
+// newIdleTracker wraps the proxy handler with the activity / in-flight
+// accounting the idle shutdown relies on. Direct handler (no ServeMux) so
+// CONNECT isn't redirected/canonicalized.
+func newIdleTracker(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		updateLastRequestTime()
+		atomic.AddInt64(&inFlight, 1)
+		defer atomic.AddInt64(&inFlight, -1)
+		// Long-lived CONNECT tunnels: restart the idle clock when they end too.
+		defer updateLastRequestTime()
+		h.ServeHTTP(w, r)
+	})
+}
+
 // newProxyHTTPServer builds the LAN-facing proxy server. ReadHeaderTimeout
 // stops slowloris-style clients that dribble request headers; IdleTimeout
 // reaps idle keep-alive connections. No Read/WriteTimeout: they would break
@@ -217,14 +232,7 @@ func main() {
 	proxyServer := proxy.NewProxyServer(certManager, runtimeDir())
 
 	// Direct handler (no ServeMux) so CONNECT isn't redirected/canonicalized.
-	idleTracker := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		updateLastRequestTime()
-		atomic.AddInt64(&inFlight, 1)
-		defer atomic.AddInt64(&inFlight, -1)
-		// Long-lived CONNECT tunnels: restart the idle clock when they end too.
-		defer updateLastRequestTime()
-		proxyServer.ServeHTTP(w, r)
-	})
+	idleTracker := newIdleTracker(proxyServer)
 
 	proxySrv := newProxyHTTPServer(proxyAddr, idleTracker)
 	apiServer := api.NewAPIServer(proxyServer, apiToken, runtimeDir())

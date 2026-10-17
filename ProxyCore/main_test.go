@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -106,14 +107,15 @@ func TestProxyHTTPServerHasSlowlorisProtection(t *testing.T) {
 	}
 }
 
-func TestProxyServerClosesSlowlorisClientAndInFlightDrops(t *testing.T) {
-	old := atomic.LoadInt64(&inFlight)
-	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt64(&inFlight, 1)
-		defer atomic.AddInt64(&inFlight, -1)
-	})
-	srv := newProxyHTTPServer("127.0.0.1:0", h)
-	srv.ReadHeaderTimeout = 200 * time.Millisecond
+func TestSlowlorisClientClosedAndInFlightZero(t *testing.T) {
+	old := proxyReadHeaderTimeout
+	proxyReadHeaderTimeout = 200 * time.Millisecond
+	defer func() { proxyReadHeaderTimeout = old }()
+
+	// Real tracker from main.go around a trivial handler.
+	srv := newProxyHTTPServer("127.0.0.1:0", newIdleTracker(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})))
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -128,14 +130,24 @@ func TestProxyServerClosesSlowlorisClientAndInFlightDrops(t *testing.T) {
 	defer conn.Close()
 	conn.Write([]byte("GET / HTTP/1.1\r\nHost: x\r\nX-Slow: "))
 	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
-	buf := make([]byte, 256)
-	conn.Read(buf) // 408 or EOF once the server gives up
-	if _, err := conn.Read(buf); err == nil {
-		t.Fatal("expected closed connection")
-	} else if ne, ok := err.(net.Error); ok && ne.Timeout() {
-		t.Fatal("slowloris client not closed")
+	_, _ = io.Copy(io.Discard, conn) // server answers 408 and closes
+	if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err == nil {
+		if _, err := conn.Read(make([]byte, 1)); err == nil {
+			t.Fatal("expected closed connection")
+		} else if ne, ok := err.(net.Error); ok && ne.Timeout() {
+			t.Fatal("slowloris client not closed (ReadHeaderTimeout missing?)")
+		}
 	}
-	if got := atomic.LoadInt64(&inFlight); got != old {
-		t.Fatalf("inFlight = %d, want %d", got, old)
+	waitInFlightZero(t)
+}
+
+func waitInFlightZero(t *testing.T) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for atomic.LoadInt64(&inFlight) != 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("inFlight = %d, want 0", atomic.LoadInt64(&inFlight))
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
