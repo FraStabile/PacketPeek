@@ -137,3 +137,31 @@ struct WebSocketFrameTests {
         #expect(task.closeCode == .invalid)
     }
 }
+
+struct HeaderRedactorTests {
+
+    @Test func masksSensitiveHeadersCaseInsensitively() {
+        let out = HeaderRedactor.redact([
+            "authorization": "Bearer abc", "Cookie": "sid=1", "SET-COOKIE": "sid=2",
+            "Proxy-Authorization": "Basic x", "X-Api-Key": "k", "Accept": "*/*"
+        ])
+        #expect(out["authorization"] == HeaderRedactor.mask)
+        #expect(out["Cookie"] == HeaderRedactor.mask)
+        #expect(out["SET-COOKIE"] == HeaderRedactor.mask)
+        #expect(out["Proxy-Authorization"] == HeaderRedactor.mask)
+        #expect(out["X-Api-Key"] == HeaderRedactor.mask)
+        #expect(out["Accept"] == "*/*")
+    }
+
+    @Test func revealReturnsOriginalValues() {
+        let headers = ["Authorization": "Bearer abc"]
+        #expect(HeaderRedactor.redact(headers, reveal: true) == headers)
+        #expect(HeaderRedactor.value(for: "Authorization", "Bearer abc", reveal: true) == "Bearer abc")
+    }
+
+    @Test func detectsSensitiveHeaders() {
+        #expect(HeaderRedactor.hasSensitive(["Cookie": "a"]))
+        #expect(!HeaderRedactor.hasSensitive(["Accept": "a"]))
+        #expect(!HeaderRedactor.isSensitive("Content-Type"))
+    }
+}

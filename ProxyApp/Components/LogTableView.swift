@@ -87,8 +87,16 @@ struct LogTableView: View {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(selected.url, forType: .string)
                 }
-                Button("Export") {
+                Button("Export (sensitive headers masked)") {
                     viewModel.exportRequestToTxt(request: selected)
+                }
+                if HeaderRedactor.hasSensitive(selected.requestHeaders)
+                    || HeaderRedactor.hasSensitive(selected.responseHeaders) {
+                    Button("Export with sensitive values…") {
+                        if confirmReveal(action: "export") {
+                            viewModel.exportRequestToTxt(request: selected, revealSensitive: true)
+                        }
+                    }
                 }
                 Button("Mock Request") {
                     editViewModel.setupProxyLog(proxyLog: selected)
@@ -107,4 +115,16 @@ struct LogTableView: View {
         default:        return Color(red: 0.92, green: 0.32, blue: 0.32)
         }
     }
+}
+
+/// Asks the user to explicitly confirm that credentials/cookies will be shown or written in clear text.
+@MainActor
+func confirmReveal(action: String) -> Bool {
+    let alert = NSAlert()
+    alert.messageText = "Reveal sensitive values?"
+    alert.informativeText = "Authorization, Cookie and Set-Cookie values will be \(action) in clear text."
+    alert.alertStyle = .warning
+    alert.addButton(withTitle: "Cancel")
+    alert.addButton(withTitle: "Reveal")
+    return alert.runModal() == .alertSecondButtonReturn
 }

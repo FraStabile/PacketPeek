@@ -255,7 +255,9 @@ final class HomeViewModel: BaseViewModel {
         }
     }
     
-    func exportRequestToTxt(request: ProxyLog) {
+    func exportRequestToTxt(request: ProxyLog, revealSensitive: Bool = false) {
+        let reqHeaders = HeaderRedactor.redact(request.requestHeaders, reveal: revealSensitive)
+        let resHeaders = HeaderRedactor.redact(request.responseHeaders, reveal: revealSensitive)
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
         
@@ -271,7 +273,7 @@ final class HomeViewModel: BaseViewModel {
             📱 User-Agent: \(request.userAgent ?? "N/A")
             
             🧾 Headers:
-            \(request.requestHeaders.map { "\($0.key): \($0.value)" }.joined(separator: "\n"))
+            \(reqHeaders.map { "\($0.key): \($0.value)" }.joined(separator: "\n"))
             
             📝 Body:
             \(request.requestBody ?? "<empty>")
@@ -282,7 +284,7 @@ final class HomeViewModel: BaseViewModel {
             📡 Status: \(request.statusCode)
             ⏱ Duration: \(String(format: "%.2f", request.responseTime)) ms
             🧾 Headers:
-            \(request.responseHeaders.map { "\($0.key): \($0.value)" }.joined(separator: "\n"))
+            \(resHeaders.map { "\($0.key): \($0.value)" }.joined(separator: "\n"))
             
             📝 Body:
             \(request.responseBody ?? "<empty>")
