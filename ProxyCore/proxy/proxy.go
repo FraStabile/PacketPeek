@@ -33,6 +33,11 @@ const (
 	upstreamTLSHandshake   = 10 * time.Second
 	upstreamResponseHeader = 60 * time.Second
 	upstreamIdleConn       = 90 * time.Second
+
+	// Client-side tunnel deadlines (CONNECT). A silent client must not pin a
+	// goroutine and an FD forever (and keep the daemon from idling out).
+	tunnelHandshakeTimeout = 15 * time.Second // CONNECT 200 + TLS handshake
+	tunnelIdleTimeout      = 2 * time.Minute  // wait for the next request headers
 )
 
 type RequestLog struct {
@@ -94,6 +99,17 @@ type ProxyServer struct {
 	// allowLoopbackTargets disables checkTarget. Tests only: their upstreams
 	// are httptest servers on 127.0.0.1.
 	allowLoopbackTargets bool
+
+	// Tunnel deadlines; zero means the package defaults. Overridable in tests.
+	tunnelHandshakeTimeout time.Duration
+	tunnelIdleTimeout      time.Duration
+}
+
+func orDefault(d, def time.Duration) time.Duration {
+	if d > 0 {
+		return d
+	}
+	return def
 }
 
 func NewProxyServer(certManager *cert.CertManager, runtimeDir string) *ProxyServer {
@@ -406,6 +422,11 @@ func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	handshakeTimeout := orDefault(p.tunnelHandshakeTimeout, tunnelHandshakeTimeout)
+	idleTimeout := orDefault(p.tunnelIdleTimeout, tunnelIdleTimeout)
+	// Bounds the 200 write and the lazy TLS handshake done by the first read.
+	_ = clientConn.SetDeadline(time.Now().Add(handshakeTimeout))
+
 	if _, err := clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n")); err != nil {
 		parentLog.StatusCode = http.StatusInternalServerError
 		p.addLog(parentLog)
@@ -427,7 +448,12 @@ func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 
 	reader := bufio.NewReader(tlsConn)
 
-	for {
+	for first := true; ; first = false {
+		// Waiting for request headers: the handshake deadline already covers
+		// the first one; later ones get the keep-alive idle timeout.
+		if !first {
+			_ = tlsConn.SetReadDeadline(time.Now().Add(idleTimeout))
+		}
 		req, err := http.ReadRequest(reader)
 		if err != nil {
 			if err != io.EOF {
@@ -435,6 +461,10 @@ func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
+
+		// Headers received: lift the deadlines so long uploads, downloads and
+		// SSE streams are not cut (the upstream transport has its own timeouts).
+		_ = tlsConn.SetDeadline(time.Time{})
 
 		reqLog := RequestLog{
 			Timestamp:       time.Now(),
