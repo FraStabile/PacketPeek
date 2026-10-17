@@ -2,7 +2,10 @@ package main
 
 import (
 	"errors"
+	"net"
+	"net/http"
 	"os"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -90,5 +93,49 @@ func TestWaitForShutdownSignalAndError(t *testing.T) {
 	errc <- errors.New("bind: address already in use")
 	if code := waitForShutdown(make(chan os.Signal), make(chan struct{}), errc); code != 1 {
 		t.Fatalf("error exit code = %d, want 1", code)
+	}
+}
+
+func TestProxyHTTPServerHasSlowlorisProtection(t *testing.T) {
+	srv := newProxyHTTPServer(":0", http.NotFoundHandler())
+	if srv.ReadHeaderTimeout <= 0 || srv.IdleTimeout <= 0 {
+		t.Fatalf("missing timeouts: %v %v", srv.ReadHeaderTimeout, srv.IdleTimeout)
+	}
+	if srv.ReadTimeout != 0 || srv.WriteTimeout != 0 {
+		t.Fatal("Read/WriteTimeout would break streaming and long transfers")
+	}
+}
+
+func TestProxyServerClosesSlowlorisClientAndInFlightDrops(t *testing.T) {
+	old := atomic.LoadInt64(&inFlight)
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt64(&inFlight, 1)
+		defer atomic.AddInt64(&inFlight, -1)
+	})
+	srv := newProxyHTTPServer("127.0.0.1:0", h)
+	srv.ReadHeaderTimeout = 200 * time.Millisecond
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go srv.Serve(ln)
+	defer srv.Close()
+
+	conn, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	conn.Write([]byte("GET / HTTP/1.1\r\nHost: x\r\nX-Slow: "))
+	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	buf := make([]byte, 256)
+	conn.Read(buf) // 408 or EOF once the server gives up
+	if _, err := conn.Read(buf); err == nil {
+		t.Fatal("expected closed connection")
+	} else if ne, ok := err.(net.Error); ok && ne.Timeout() {
+		t.Fatal("slowloris client not closed")
+	}
+	if got := atomic.LoadInt64(&inFlight); got != old {
+		t.Fatalf("inFlight = %d, want %d", got, old)
 	}
 }
