@@ -228,8 +228,8 @@ func TestExpiringLeafIsRegenerated(t *testing.T) {
 		t.Fatal(err)
 	}
 	orig := leafRenewBefore
-	leafRenewBefore = 2 * 365 * 24 * time.Hour // everything counts as about to expire
 	t.Cleanup(func() { leafRenewBefore = orig })
+	leafRenewBefore = 2 * 365 * 24 * time.Hour // everything counts as about to expire
 	if _, err := cm.GenerateCertificate("renew.example"); err != nil {
 		t.Fatal(err)
 	}
@@ -241,6 +241,7 @@ func TestExpiringLeafIsRegenerated(t *testing.T) {
 func TestFailedLeafNotCachedAndNoDeadlock(t *testing.T) {
 	cm, _ := newTestManager(t)
 	orig := genKey
+	t.Cleanup(func() { genKey = orig })
 	genKey = func(int) (*rsa.PrivateKey, error) { return nil, os.ErrInvalid }
 	if _, err := cm.GenerateCertificate("fail.example"); err == nil {
 		t.Fatal("expected error")
@@ -248,6 +249,63 @@ func TestFailedLeafNotCachedAndNoDeadlock(t *testing.T) {
 	genKey = orig
 	if _, err := cm.GenerateCertificate("fail.example"); err != nil {
 		t.Fatalf("retry after failure: %v", err)
+	}
+}
+
+func TestPanicInSignLeafReleasesInflight(t *testing.T) {
+	cm, _ := newTestManager(t)
+	orig := genKey
+	t.Cleanup(func() { genKey = orig })
+	genKey = func(int) (*rsa.PrivateKey, error) { panic("boom") }
+
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("expected panic to propagate")
+			}
+		}()
+		cm.GenerateCertificate("panic.example")
+	}()
+
+	cm.mu.Lock()
+	n := len(cm.inflight)
+	_, cached := cm.leafCache["panic.example"]
+	cm.mu.Unlock()
+	if n != 0 || cached {
+		t.Fatalf("inflight=%d cached=%v after panic", n, cached)
+	}
+
+	genKey = orig
+	done := make(chan error, 1)
+	go func() { _, err := cm.GenerateCertificate("panic.example"); done <- err }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("retry after panic: %v", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("retry blocked: inflight not released")
+	}
+}
+
+func TestLeafParseFailureReturnsErrorWithoutCaching(t *testing.T) {
+	cm, _ := newTestManager(t)
+	n := countKeygen(t)
+	orig := parseCert
+	t.Cleanup(func() { parseCert = orig })
+	parseCert = func([]byte) (*x509.Certificate, error) { return nil, os.ErrInvalid }
+
+	if _, err := cm.GenerateCertificate("parse.example"); err == nil {
+		t.Fatal("expected error")
+	}
+	cm.mu.Lock()
+	_, cached := cm.leafCache["parse.example"]
+	cm.mu.Unlock()
+	if cached {
+		t.Fatal("failed leaf must not be cached")
+	}
+	if got := atomic.LoadInt32(n); got != 1 {
+		t.Fatalf("keygen count = %d, want 1 (no regeneration loop)", got)
 	}
 }
 

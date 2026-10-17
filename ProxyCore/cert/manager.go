@@ -46,7 +46,8 @@ var (
 	// leafRenewBefore: cached leaves expiring sooner than this are regenerated.
 	leafRenewBefore = 24 * time.Hour
 	// genKey creates RSA keys; tests wrap it to count invocations.
-	genKey = func(bits int) (*rsa.PrivateKey, error) { return rsa.GenerateKey(rand.Reader, bits) }
+	parseCert = x509.ParseCertificate
+	genKey    = func(bits int) (*rsa.PrivateKey, error) { return rsa.GenerateKey(rand.Reader, bits) }
 )
 
 // NewCertManager loads (or generates) the root CA from baseDir.
@@ -263,29 +264,33 @@ func (cm *CertManager) GenerateCertificate(host string) (*tls.Certificate, error
 		return nil, fmt.Errorf("empty host for cert generation")
 	}
 
-	for {
-		cm.mu.Lock()
-		if cached, ok := cm.leafCache[host]; ok {
-			if cached.Leaf != nil && time.Until(cached.Leaf.NotAfter) > leafRenewBefore {
-				cm.mu.Unlock()
-				return cached, nil
-			}
-			delete(cm.leafCache, host)
-		}
-		if call, ok := cm.inflight[host]; ok {
+	cm.mu.Lock()
+	if cached, ok := cm.leafCache[host]; ok {
+		if cached.Leaf != nil && time.Until(cached.Leaf.NotAfter) > leafRenewBefore {
 			cm.mu.Unlock()
-			<-call.done
-			if call.err != nil {
-				return nil, call.err
-			}
-			return call.cert, nil
+			return cached, nil
 		}
-		call := &leafCall{done: make(chan struct{})}
-		cm.inflight[host] = call
+		delete(cm.leafCache, host)
+	}
+	if call, ok := cm.inflight[host]; ok {
 		cm.mu.Unlock()
+		<-call.done
+		if call.err != nil {
+			return nil, call.err
+		}
+		return call.cert, nil
+	}
+	call := &leafCall{done: make(chan struct{})}
+	cm.inflight[host] = call
+	cm.mu.Unlock()
 
-		call.cert, call.err = cm.signLeaf(host)
-
+	// Always release the in-flight slot, even if signLeaf panics, so waiters
+	// are woken (with an error) and later calls can retry.
+	completed := false
+	defer func() {
+		if !completed {
+			call.err = fmt.Errorf("leaf generation for %q aborted", host)
+		}
 		cm.mu.Lock()
 		if call.err == nil {
 			cm.leafCache[host] = call.cert
@@ -293,8 +298,11 @@ func (cm *CertManager) GenerateCertificate(host string) (*tls.Certificate, error
 		delete(cm.inflight, host)
 		cm.mu.Unlock()
 		close(call.done)
-		return call.cert, call.err
-	}
+	}()
+
+	call.cert, call.err = cm.signLeaf(host)
+	completed = true
+	return call.cert, call.err
 }
 
 func (cm *CertManager) signLeaf(host string) (*tls.Certificate, error) {
@@ -345,10 +353,12 @@ func (cm *CertManager) signLeaf(host string) (*tls.Certificate, error) {
 	if err != nil {
 		return nil, err
 	}
-	if cert.Leaf == nil {
-		if leaf, err := x509.ParseCertificate(derBytes); err == nil {
-			cert.Leaf = leaf
-		}
+	// Leaf is needed for expiry checks on cached entries; a parse failure is
+	// returned as an error (never cached, never silently regenerated in a loop).
+	leaf, err := parseCert(derBytes)
+	if err != nil {
+		return nil, fmt.Errorf("parse generated leaf: %w", err)
 	}
+	cert.Leaf = leaf
 	return &cert, nil
 }
