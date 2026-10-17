@@ -40,6 +40,10 @@ const (
 	// goroutine and an FD forever (and keep the daemon from idling out).
 	tunnelHandshakeTimeout = 15 * time.Second // CONNECT 200 + TLS handshake
 	tunnelIdleTimeout      = 2 * time.Minute  // wait for the next request headers
+
+	// Inactivity limit on an upgraded (WebSocket) client connection; each
+	// frame renews it, so only a dead peer is dropped.
+	upgradedIdleTimeout = 10 * time.Minute
 )
 
 type RequestLog struct {
@@ -311,6 +315,10 @@ func (p *ProxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Body != nil && r.Body != http.NoBody {
 		outReq.Body = teeBody(r.Body, reqBody)
 	}
+	// Strip hop-by-hop headers (Proxy-Authorization, Proxy-Connection, Te...),
+	// keeping Connection/Upgrade only for a WebSocket handshake.
+	wantUpgrade := isWebSocketUpgrade(r.Header)
+	stripHopHeaders(outReq.Header, wantUpgrade)
 
 	resp, err := p.upstream.RoundTrip(outReq)
 	logEntry.RequestBody = reqBody.String(reqEncoding)
@@ -322,11 +330,21 @@ func (p *ProxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
+	switchingProtocols := resp.StatusCode == http.StatusSwitchingProtocols && wantUpgrade
+	stripHopHeaders(resp.Header, switchingProtocols)
 	for k, v := range resp.Header {
 		logEntry.ResponseHeaders[k] = strings.Join(v, ", ")
+		if switchingProtocols {
+			continue
+		}
 		for _, vv := range v {
 			w.Header().Add(k, vv)
 		}
+	}
+	if switchingProtocols {
+		logEntry.StatusCode = resp.StatusCode
+		p.tunnelUpgradedHTTP(w, resp, &logEntry)
+		return
 	}
 	w.WriteHeader(resp.StatusCode)
 	logEntry.StatusCode = resp.StatusCode
@@ -551,11 +569,10 @@ func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 		outReq.ContentLength = req.ContentLength // -1 when the client sent chunked
 		// Copy request headers, but strip hop-by-hop entries.
 		for k, v := range req.Header {
-			if isHopHeader(k) {
-				continue
-			}
 			outReq.Header[k] = v
 		}
+		wantUpgrade := isWebSocketUpgrade(req.Header)
+		stripHopHeaders(outReq.Header, wantUpgrade)
 
 		// RoundTrip, not http.Client: no total timeout (would kill long
 		// downloads / SSE; the transport's dial/TLS/header timeouts still
@@ -570,6 +587,23 @@ func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 		}
 
 		reqLog.StatusCode = resp.StatusCode
+		if resp.StatusCode == http.StatusSwitchingProtocols && wantUpgrade {
+			stripHopHeaders(resp.Header, true)
+			for k, v := range resp.Header {
+				reqLog.ResponseHeaders[k] = strings.Join(v, ", ")
+			}
+			err := writeSwitchingProtocols(tlsConn, resp)
+			reqLog.Completed = time.Now()
+			reqLog.ResponseTime = Milliseconds(reqLog.Completed.Sub(reqLog.Timestamp))
+			p.addLog(reqLog)
+			if up, ok := resp.Body.(io.ReadWriteCloser); ok && err == nil {
+				idleConn.setTimeout(upgradedIdleTimeout)
+				pipeUpgraded(tlsConn, reader, up)
+			}
+			resp.Body.Close()
+			return
+		}
+		stripHopHeaders(resp.Header, false)
 		for k, v := range resp.Header {
 			reqLog.ResponseHeaders[k] = strings.Join(v, ", ")
 		}
@@ -634,6 +668,110 @@ func writeMockToTLSConn(conn *tls.Conn, m *MockResponse) {
 		},
 	}
 	_ = resp.Write(conn)
+}
+
+// isWebSocketUpgrade reports whether h is a WebSocket handshake
+// (Connection: Upgrade + Upgrade: websocket).
+func isWebSocketUpgrade(h http.Header) bool {
+	return headerHasToken(h, "Connection", "upgrade") && headerHasToken(h, "Upgrade", "websocket")
+}
+
+func headerHasToken(h http.Header, key, token string) bool {
+	for _, v := range h.Values(key) {
+		for _, t := range strings.Split(v, ",") {
+			if strings.EqualFold(strings.TrimSpace(t), token) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// stripHopHeaders removes hop-by-hop headers, including those named in
+// Connection. With keepUpgrade (WebSocket handshake) Connection: Upgrade and
+// Upgrade are re-established so the upgrade survives the hop.
+func stripHopHeaders(h http.Header, keepUpgrade bool) {
+	var named []string
+	for _, v := range h.Values("Connection") {
+		for _, t := range strings.Split(v, ",") {
+			if t = strings.TrimSpace(t); t != "" {
+				named = append(named, t)
+			}
+		}
+	}
+	upgrade := h.Get("Upgrade")
+	for k := range h {
+		if isHopHeader(k) {
+			delete(h, k)
+		}
+	}
+	for _, n := range named {
+		h.Del(n)
+	}
+	if keepUpgrade {
+		h.Set("Connection", "Upgrade")
+		h.Set("Upgrade", upgrade)
+	}
+}
+
+// writeSwitchingProtocols writes the upstream 101 response head to the client.
+func writeSwitchingProtocols(w io.Writer, resp *http.Response) error {
+	var b bytes.Buffer
+	b.WriteString("HTTP/1.1 101 Switching Protocols\r\n")
+	if err := resp.Header.Write(&b); err != nil {
+		return err
+	}
+	b.WriteString("\r\n")
+	_, err := w.Write(b.Bytes())
+	return err
+}
+
+// pipeUpgraded copies bytes both ways between the client and the upgraded
+// upstream connection until either side ends, then closes both.
+// clientIn may hold bytes already buffered from the client.
+func pipeUpgraded(client io.ReadWriteCloser, clientIn io.Reader, upstream io.ReadWriteCloser) {
+	done := make(chan struct{}, 2)
+	go func() {
+		_, _ = io.Copy(upstream, clientIn)
+		done <- struct{}{}
+	}()
+	go func() {
+		_, _ = io.Copy(client, upstream)
+		done <- struct{}{}
+	}()
+	<-done
+	_ = client.Close()
+	_ = upstream.Close()
+	<-done
+}
+
+// tunnelUpgradedHTTP hijacks the plain-HTTP client connection after an
+// upstream 101 and relays raw bytes in both directions.
+func (p *ProxyServer) tunnelUpgradedHTTP(w http.ResponseWriter, resp *http.Response, entry *RequestLog) {
+	upstream, ok := resp.Body.(io.ReadWriteCloser)
+	hj, hok := w.(http.Hijacker)
+	if !ok || !hok {
+		entry.StatusCode = http.StatusInternalServerError
+		p.addLog(*entry)
+		http.Error(w, "upgrade not supported", http.StatusInternalServerError)
+		return
+	}
+	conn, rw, err := hj.Hijack()
+	if err != nil {
+		entry.StatusCode = http.StatusInternalServerError
+		p.addLog(*entry)
+		return
+	}
+	defer conn.Close()
+	entry.Completed = time.Now()
+	entry.ResponseTime = Milliseconds(entry.Completed.Sub(entry.Timestamp))
+	p.addLog(*entry)
+
+	client := newIdleConn(conn, upgradedIdleTimeout)
+	if err := writeSwitchingProtocols(client, resp); err != nil {
+		return
+	}
+	pipeUpgraded(client, rw.Reader, upstream)
 }
 
 func isHopHeader(name string) bool {
