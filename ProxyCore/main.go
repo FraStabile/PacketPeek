@@ -27,6 +27,9 @@ const (
 	idleTimeout = 5 * time.Minute
 	idlePoll    = 30 * time.Second
 
+	proxyReadHeaderTimeout = 10 * time.Second
+	proxyIdleConnTimeout   = 2 * time.Minute
+
 	// exitCodeIdle is the process exit status after an idle shutdown. ProxyApp
 	// (ProxyCore.swift) matches on it to show "Stopped (idle)" instead of an error.
 	exitCodeIdle = 3
@@ -173,6 +176,19 @@ func waitForShutdown(sig <-chan os.Signal, idle <-chan struct{}, serveErr <-chan
 	}
 }
 
+// newProxyHTTPServer builds the LAN-facing proxy server. ReadHeaderTimeout
+// stops slowloris-style clients that dribble request headers; IdleTimeout
+// reaps idle keep-alive connections. No Read/WriteTimeout: they would break
+// long downloads, uploads and SSE (and CONNECT tunnels are hijacked anyway).
+func newProxyHTTPServer(addr string, h http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           h,
+		ReadHeaderTimeout: proxyReadHeaderTimeout,
+		IdleTimeout:       proxyIdleConnTimeout,
+	}
+}
+
 func main() {
 	initRuntimePaths()
 
@@ -210,10 +226,7 @@ func main() {
 		proxyServer.ServeHTTP(w, r)
 	})
 
-	proxySrv := &http.Server{
-		Addr:    proxyAddr,
-		Handler: idleTracker,
-	}
+	proxySrv := newProxyHTTPServer(proxyAddr, idleTracker)
 	apiServer := api.NewAPIServer(proxyServer, apiToken, runtimeDir())
 	apiSrv := apiServer.HTTPServer(apiAddr)
 
