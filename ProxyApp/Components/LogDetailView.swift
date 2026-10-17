@@ -171,7 +171,7 @@ struct LogDetailView: View {
                           systemImage: reveal.wrappedValue ? "eye.slash" : "eye")
                         .font(Typography.badge)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.borderless)
                 .foregroundStyle(Surface.secondaryText)
             }
             ScrollView {

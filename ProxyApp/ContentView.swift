@@ -109,6 +109,7 @@ struct ContentView: View {
 
             if let selected = viewModel.selectedLog {
                 LogDetailView(log: selected)
+                    .id(selected.id)
                     .frame(minHeight: 200, maxHeight: .infinity)
             } else {
                 detailPlaceholder

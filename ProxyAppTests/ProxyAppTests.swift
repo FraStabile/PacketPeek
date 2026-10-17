@@ -164,4 +164,34 @@ struct HeaderRedactorTests {
         #expect(!HeaderRedactor.hasSensitive(["Accept": "a"]))
         #expect(!HeaderRedactor.isSensitive("Content-Type"))
     }
+
+    @Test func trimsNamesAndHandlesEmpty() {
+        #expect(HeaderRedactor.isSensitive("  X-Auth-Token "))
+        #expect(HeaderRedactor.redact([:]).isEmpty)
+        #expect(!HeaderRedactor.hasSensitive([:]))
+        #expect(HeaderRedactor.redact(["X-Auth-Token": "t"])["X-Auth-Token"] == HeaderRedactor.mask)
+    }
+}
+
+struct TransactionExporterTests {
+    private func makeLog() throws -> ProxyLog {
+        let json = """
+        {"method":"GET","url":"https://example.com/","request_headers":{"Authorization":"Bearer SECRET","Accept":"*/*"},
+         "response_headers":{"Set-Cookie":"sid=SECRET2"},"status_code":200,"timestamp":"2025-04-10T10:00:00Z"}
+        """
+        return try JSONDecoder().decode(ProxyLog.self, from: Data(json.utf8))
+    }
+
+    @Test func masksByDefault() throws {
+        let text = TransactionExporter.text(for: try makeLog())
+        #expect(!text.contains("SECRET"))
+        #expect(text.contains("Authorization: \(HeaderRedactor.mask)"))
+        #expect(text.contains("Accept: */*"))
+    }
+
+    @Test func revealsWhenRequested() throws {
+        let text = TransactionExporter.text(for: try makeLog(), revealSensitive: true)
+        #expect(text.contains("Authorization: Bearer SECRET"))
+        #expect(text.contains("Set-Cookie: sid=SECRET2"))
+    }
 }

@@ -87,7 +87,7 @@ struct LogTableView: View {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(selected.url, forType: .string)
                 }
-                Button("Export (sensitive headers masked)") {
+                Button("Export as TXT (sensitive headers masked)") {
                     viewModel.exportRequestToTxt(request: selected)
                 }
                 if HeaderRedactor.hasSensitive(selected.requestHeaders)
@@ -122,7 +122,7 @@ struct LogTableView: View {
 func confirmReveal(action: String) -> Bool {
     let alert = NSAlert()
     alert.messageText = "Reveal sensitive values?"
-    alert.informativeText = "Authorization, Cookie and Set-Cookie values will be \(action) in clear text."
+    alert.informativeText = "Values of Authorization, Proxy-Authorization, Cookie, Set-Cookie, X-Api-Key and X-Auth-Token will be \(action) in clear text."
     alert.alertStyle = .warning
     alert.addButton(withTitle: "Cancel")
     alert.addButton(withTitle: "Reveal")

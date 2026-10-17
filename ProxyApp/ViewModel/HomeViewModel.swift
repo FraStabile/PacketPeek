@@ -256,40 +256,8 @@ final class HomeViewModel: BaseViewModel {
     }
     
     func exportRequestToTxt(request: ProxyLog, revealSensitive: Bool = false) {
-        let reqHeaders = HeaderRedactor.redact(request.requestHeaders, reveal: revealSensitive)
-        let resHeaders = HeaderRedactor.redact(request.responseHeaders, reveal: revealSensitive)
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        
-        let exportText = """
-            📦 HTTP Transaction Export
-            ============================
-            
-            📬 REQUEST
-            ----------------------------
-            🕒 Timestamp: \(formatter.string(from: request.timestamp))
-            🔗 URL: \(request.url)
-            📬 Method: \(request.method)
-            📱 User-Agent: \(request.userAgent ?? "N/A")
-            
-            🧾 Headers:
-            \(reqHeaders.map { "\($0.key): \($0.value)" }.joined(separator: "\n"))
-            
-            📝 Body:
-            \(request.requestBody ?? "<empty>")
-            
-            
-            📥 RESPONSE
-            ----------------------------
-            📡 Status: \(request.statusCode)
-            ⏱ Duration: \(String(format: "%.2f", request.responseTime)) ms
-            🧾 Headers:
-            \(resHeaders.map { "\($0.key): \($0.value)" }.joined(separator: "\n"))
-            
-            📝 Body:
-            \(request.responseBody ?? "<empty>")
-            """
-        
+        let exportText = TransactionExporter.text(for: request, revealSensitive: revealSensitive)
+
         let panel = NSSavePanel()
         panel.title = "Export HTTP Transaction"
         panel.nameFieldStringValue = "request_export.txt"
