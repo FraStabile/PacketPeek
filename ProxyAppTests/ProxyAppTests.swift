@@ -73,3 +73,16 @@ struct MockItemRequestTests {
         #expect(decoded == mock)
     }
 }
+
+struct AppEnvironmentTests {
+
+    @Test func detectsXCTestEnvironment() {
+        #expect(AppEnvironment.isRunningTests(["XCTestConfigurationFilePath": "/tmp/x.xctestconfiguration"]))
+        #expect(!AppEnvironment.isRunningTests([:]))
+    }
+
+    @Test func isActiveInsideTestRun() {
+        // Guards the startup side effects (daemon, system proxy) while tests run.
+        #expect(AppEnvironment.isRunningTests())
+    }
+}
