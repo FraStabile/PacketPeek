@@ -137,3 +137,15 @@ struct WebSocketFrameTests {
         #expect(task.closeCode == .invalid)
     }
 }
+
+struct MockJSONWarningTests {
+    @Test func validOrEmptyBodyHasNoWarning() {
+        #expect(MockModalEditViewModel.jsonWarning(for: "") == nil)
+        #expect(MockModalEditViewModel.jsonWarning(for: "  {\"a\": [1, 2]}\n") == nil)
+    }
+
+    @Test func invalidBodyWarns() {
+        #expect(MockModalEditViewModel.jsonWarning(for: "{\"a\": ") != nil)
+        #expect(MockModalEditViewModel.jsonWarning(for: "<html>") != nil)
+    }
+}

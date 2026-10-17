@@ -5,135 +5,119 @@
 //  Created by Francesco Stabile on 15/04/25.
 //
 import SwiftUI
+
+/// Single editor used both to create a mock from a captured request and to
+/// edit an existing one (see `MockModalEditViewModel.isEditing`).
 struct MockModalEditView: View {
     @EnvironmentObject var modalRouter: ModalRouter
     @StateObject var viewModel: MockModalEditViewModel
     init(viewModel: MockModalEditViewModel) {
         self._viewModel = StateObject(wrappedValue: viewModel)
     }
-    
-    private func formatJSON(_ string: String) -> String {
-        guard
-            let data = string.data(using: .utf8),
-            let obj = try? JSONSerialization.jsonObject(with: data),
-            let prettyData = try? JSONSerialization.data(withJSONObject: obj, options: .prettyPrinted),
-            let prettyString = String(data: prettyData, encoding: .utf8)
-        else {
-            return string
-        }
-        return prettyString
-    }
-    
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            Text("Modifica Mock")
-                .font(.title2.bold())
-                .padding(.top)
-            
-            VStack(alignment: .leading, spacing: 8) {
-                Group {
-                    HStack(alignment: .top) {
-                        Text("Metodo:")
-                            .font(.subheadline).bold()
-                            .frame(width: 80, alignment: .leading)
-                        Text(viewModel.log.method)
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
-                    
-                    HStack(alignment: .top) {
-                        Text("URL:")
-                            .font(.subheadline).bold()
-                            .frame(width: 80, alignment: .leading)
-                        Text(viewModel.log.url)
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                            .lineLimit(4)
-                            .truncationMode(.middle)
-                    }
+        VStack(alignment: .leading, spacing: Spacing.xl) {
+            Text(viewModel.isEditing ? "Edit Mock" : "Add Mock")
+                .font(Typography.title)
+
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                summaryRow("Method") {
+                    MethodBadge(method: viewModel.log.method)
+                }
+                summaryRow("URL") {
+                    Text(viewModel.log.url)
+                        .font(Typography.bodyMono)
+                        .foregroundStyle(Surface.secondaryText)
+                        .lineLimit(4)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
                 }
             }
-            
+
             Divider()
-            
-            VStack(spacing: 16) {
-                HStack(spacing: 24) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Latenza (ms)")
-                            .font(.subheadline).bold()
-                        TextField("Es: 150", text: $viewModel.latency)
-                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                            .frame(width: 120)
-                    }
-                    
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Status Code")
-                            .font(.subheadline).bold()
-                        TextField("Es: 200", text: $viewModel.statusCode)
-                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                            .frame(width: 120)
-                    }
-                }
-                
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Risposta JSON")
-                        .font(.subheadline).bold()
-                    
-                    TextEditor(text: $viewModel.response)
-                        .font(.system(.body, design: .monospaced))
-                        .frame(minHeight: 300)
-                        .padding(8)
-                        .background(Color(NSColor.textBackgroundColor))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color.gray.opacity(0.3))
-                        )
-                        .cornerRadius(8)
-                }
+
+            HStack(spacing: Spacing.xl) {
+                field("Latency (ms)", placeholder: "e.g. 150", text: $viewModel.latency)
+                field("Status code", placeholder: "e.g. 200", text: $viewModel.statusCode)
             }
-            
+
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                HStack {
+                    Text("Response body")
+                        .font(Typography.headline)
+                    Spacer()
+                    if let warning = viewModel.jsonWarning {
+                        Label(warning, systemImage: "exclamationmark.triangle.fill")
+                            .font(Typography.caption)
+                            .foregroundStyle(.orange)
+                    }
+                }
+                TextEditor(text: $viewModel.response)
+                    .font(Typography.bodyMono)
+                    .frame(minHeight: 300)
+                    .padding(Spacing.sm)
+                    .background(Color(nsColor: .textBackgroundColor))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Radius.sm)
+                            .stroke(viewModel.jsonWarning == nil ? Surface.separator : Color.orange)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: Radius.sm))
+            }
+
             Spacer()
 
             if let error = viewModel.errorMessage {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .font(.subheadline)
+                    .font(Typography.body)
                     .foregroundStyle(.red)
             }
 
-            HStack(spacing: 16) {
-                Button(action: {
+            HStack(spacing: Spacing.lg) {
+                Button("Cancel", systemImage: "xmark") {
                     modalRouter.activeModal = nil
-                }) {
-                    Label("Annulla", systemImage: "xmark")
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
                 }
-                .buttonStyle(.bordered)
-                
+                .keyboardShortcut(.cancelAction)
+
                 Spacer()
-                
-                Button(action: {
+
+                Button("Save", systemImage: "checkmark") {
                     Task {
                         // Keep the sheet open on failure so the error is visible.
                         if await viewModel.save() {
                             modalRouter.activeModal = nil
                         }
                     }
-                }) {
-                    Label("Salva", systemImage: "checkmark")
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 8)
                 }
                 .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
                 .disabled(viewModel.isSaving)
             }
-            .padding(.top)
         }
-        .padding(24)
+        .padding(Spacing.xl)
+    }
+
+    private func summaryRow<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title)
+                .font(Typography.headline)
+                .frame(width: 64, alignment: .leading)
+            content()
+        }
+    }
+
+    private func field(_ title: String, placeholder: String, text: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text(title)
+                .font(Typography.headline)
+            TextField(placeholder, text: text)
+                .textFieldStyle(.roundedBorder)
+                .font(Typography.bodyMono)
+                .frame(width: 120)
+        }
     }
 }
 
-
 #Preview {
     MockModalEditView(viewModel: MockModalEditViewModel())
+        .environmentObject(ModalRouter())
 }
