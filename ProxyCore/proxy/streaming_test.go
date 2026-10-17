@@ -383,3 +383,57 @@ func TestIdleConnRenewsDeadlineOnActivity(t *testing.T) {
 		t.Fatal("idle read should time out")
 	}
 }
+
+// A client that sends a request but never reads the (large) response must be
+// dropped by the write deadline once socket buffers fill.
+func TestNonReadingClientTunnelClosedAndInFlightZero(t *testing.T) {
+	chunk := make([]byte, 1<<20)
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for i := 0; i < 256; i++ { // up to 256 MiB, far above loopback buffers
+			if _, err := w.Write(chunk); err != nil {
+				return
+			}
+		}
+	}))
+	defer upstream.Close()
+	cm, err := cert.NewCertManager(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := NewProxyServer(cm, t.TempDir())
+	p.allowLoopbackTargets = true
+	p.upstream.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	p.tunnelIdleTimeout = 300 * time.Millisecond
+	var active atomic.Int64
+	front := httptest.NewServer(activeTracker(p, &active))
+	defer front.Close()
+
+	host := strings.TrimPrefix(upstream.URL, "https://")
+	conn, err := net.Dial("tcp", strings.TrimPrefix(front.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	io.WriteString(conn, "CONNECT "+host+" HTTP/1.1\r\nHost: "+host+"\r\n\r\n")
+	br := bufio.NewReader(conn)
+	for {
+		l, err := br.ReadString('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		if l == "\r\n" {
+			break
+		}
+	}
+	tc := tls.Client(conn, &tls.Config{InsecureSkipVerify: true})
+	io.WriteString(tc, "GET / HTTP/1.1\r\nHost: "+host+"\r\n\r\n")
+	// ...and never read. The proxy must give up on its own.
+	deadline := time.Now().Add(10 * time.Second)
+	time.Sleep(100 * time.Millisecond) // let the tunnel become active
+	for active.Load() != 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("tunnel with non-reading client not released")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
