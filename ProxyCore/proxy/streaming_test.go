@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -272,5 +273,113 @@ func TestTunnelIdleTimeoutClosesKeepAliveClient(t *testing.T) {
 		t.Fatal("unexpected data")
 	} else if ne, ok := err.(net.Error); ok && ne.Timeout() {
 		t.Fatal("idle tunnel not closed by the proxy")
+	}
+}
+
+// activeTracker wraps h counting ServeHTTP calls still running (a hijacked
+// CONNECT tunnel stays "active" until handleHTTPS returns), mirroring main's inFlight.
+func activeTracker(h http.Handler, active *atomic.Int64) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		active.Add(1)
+		defer active.Add(-1)
+		h.ServeHTTP(w, r)
+	})
+}
+
+func waitZero(t *testing.T, a *atomic.Int64) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for a.Load() != 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("active = %d, want 0", a.Load())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestSilentTunnelReleasesInFlight(t *testing.T) {
+	cm, err := cert.NewCertManager(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := NewProxyServer(cm, t.TempDir())
+	p.tunnelHandshakeTimeout = 200 * time.Millisecond
+	var active atomic.Int64
+	front := httptest.NewServer(activeTracker(p, &active))
+	defer front.Close()
+
+	conn, br := connectRaw(t, front)
+	if active.Load() != 1 {
+		t.Fatalf("active = %d while tunnel open, want 1", active.Load())
+	}
+	waitClosed(t, conn, br, 3*time.Second)
+	waitZero(t, &active)
+}
+
+// A client that sends headers and half a body, then stalls, must be dropped.
+func TestStalledBodyTunnelClosedAndInFlightZero(t *testing.T) {
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
+	}))
+	defer upstream.Close()
+	cm, err := cert.NewCertManager(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := NewProxyServer(cm, t.TempDir())
+	p.allowLoopbackTargets = true
+	p.upstream.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	p.tunnelIdleTimeout = 300 * time.Millisecond
+	var active atomic.Int64
+	front := httptest.NewServer(activeTracker(p, &active))
+	defer front.Close()
+
+	host := strings.TrimPrefix(upstream.URL, "https://")
+	conn, err := net.Dial("tcp", strings.TrimPrefix(front.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	io.WriteString(conn, "CONNECT "+host+" HTTP/1.1\r\nHost: "+host+"\r\n\r\n")
+	br := bufio.NewReader(conn)
+	for {
+		l, err := br.ReadString('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		if l == "\r\n" {
+			break
+		}
+	}
+	tc := tls.Client(conn, &tls.Config{InsecureSkipVerify: true})
+	io.WriteString(tc, "POST / HTTP/1.1\r\nHost: "+host+"\r\nContent-Length: 1000\r\n\r\nhalf")
+	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	if _, err := bufio.NewReader(tc).ReadByte(); err == nil {
+		// a 502 may legitimately be written before closing
+	} else if ne, ok := err.(net.Error); ok && ne.Timeout() {
+		t.Fatal("stalled-body tunnel not closed by the proxy")
+	}
+	waitZero(t, &active)
+}
+
+func TestIdleConnRenewsDeadlineOnActivity(t *testing.T) {
+	a, b := net.Pipe()
+	defer a.Close()
+	defer b.Close()
+	ic := newIdleConn(a, 300*time.Millisecond)
+	go func() {
+		for i := 0; i < 4; i++ { // 600ms total > timeout, but never idle 300ms
+			time.Sleep(100 * time.Millisecond)
+			b.Write([]byte("x"))
+		}
+	}()
+	buf := make([]byte, 1)
+	for i := 0; i < 4; i++ {
+		if _, err := ic.Read(buf); err != nil {
+			t.Fatalf("active connection cut at read %d: %v", i, err)
+		}
+	}
+	if _, err := ic.Read(buf); err == nil {
+		t.Fatal("idle read should time out")
 	}
 }

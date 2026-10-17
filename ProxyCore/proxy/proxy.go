@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/tls"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"proxy_core/cert"
@@ -103,6 +105,31 @@ type ProxyServer struct {
 	// Tunnel deadlines; zero means the package defaults. Overridable in tests.
 	tunnelHandshakeTimeout time.Duration
 	tunnelIdleTimeout      time.Duration
+}
+
+// idleConn renews a deadline on every Read and Write: the connection dies
+// only after `timeout` of inactivity in the operation being performed.
+type idleConn struct {
+	net.Conn
+	timeout atomic.Int64 // time.Duration
+}
+
+func newIdleConn(c net.Conn, d time.Duration) *idleConn {
+	ic := &idleConn{Conn: c}
+	ic.timeout.Store(int64(d))
+	return ic
+}
+
+func (c *idleConn) setTimeout(d time.Duration) { c.timeout.Store(int64(d)) }
+
+func (c *idleConn) Read(b []byte) (int, error) {
+	_ = c.Conn.SetReadDeadline(time.Now().Add(time.Duration(c.timeout.Load())))
+	return c.Conn.Read(b)
+}
+
+func (c *idleConn) Write(b []byte) (int, error) {
+	_ = c.Conn.SetWriteDeadline(time.Now().Add(time.Duration(c.timeout.Load())))
+	return c.Conn.Write(b)
 }
 
 func orDefault(d, def time.Duration) time.Duration {
@@ -424,8 +451,11 @@ func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 
 	handshakeTimeout := orDefault(p.tunnelHandshakeTimeout, tunnelHandshakeTimeout)
 	idleTimeout := orDefault(p.tunnelIdleTimeout, tunnelIdleTimeout)
-	// Bounds the 200 write and the lazy TLS handshake done by the first read.
-	_ = clientConn.SetDeadline(time.Now().Add(handshakeTimeout))
+	// Every Read/Write renews the deadline, so a stalled connection (silent
+	// handshake, half-sent body, client that stops reading) is dropped while
+	// active long transfers survive. Handshake budget first, idle after.
+	idleConn := newIdleConn(clientConn, handshakeTimeout)
+	clientConn = idleConn
 
 	if _, err := clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n")); err != nil {
 		parentLog.StatusCode = http.StatusInternalServerError
@@ -446,14 +476,19 @@ func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 	tlsConn := tls.Server(clientConn, tlsConfig)
 	defer tlsConn.Close()
 
+	// Total (not per-read) budget for the TLS handshake, so a client dribbling
+	// handshake bytes cannot extend it indefinitely.
+	hsCtx, hsCancel := context.WithTimeout(r.Context(), handshakeTimeout)
+	err = tlsConn.HandshakeContext(hsCtx)
+	hsCancel()
+	if err != nil {
+		log.Printf("Tunnel TLS handshake failed: %v", sanitizeError(err))
+		return
+	}
+
 	reader := bufio.NewReader(tlsConn)
 
-	for first := true; ; first = false {
-		// Waiting for request headers: the handshake deadline already covers
-		// the first one; later ones get the keep-alive idle timeout.
-		if !first {
-			_ = tlsConn.SetReadDeadline(time.Now().Add(idleTimeout))
-		}
+	for {
 		req, err := http.ReadRequest(reader)
 		if err != nil {
 			if err != io.EOF {
@@ -462,9 +497,8 @@ func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Headers received: lift the deadlines so long uploads, downloads and
-		// SSE streams are not cut (the upstream transport has its own timeouts).
-		_ = tlsConn.SetDeadline(time.Time{})
+		// Handshake done: from now on only inactivity (idleTimeout) counts.
+		idleConn.setTimeout(idleTimeout)
 
 		reqLog := RequestLog{
 			Timestamp:       time.Now(),
