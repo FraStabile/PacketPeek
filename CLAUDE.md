@@ -15,13 +15,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 cd ProxyCore/
 go build -o proxycore .       # build binary
 go test ./...                  # run tests (add -race when touching proxy.go)
+go test ./proxy -run TestName  # single test (tests live next to code in proxy/, api/, main_test.go)
 ```
+
+`ProxyCore/` also holds local runtime leftovers (`ca.key`, `ca.pem`, `mocks.json`, `*.log`, `proxycore`) — not source; don't edit or commit them.
 
 ### ProxyApp (Swift/Xcode)
 ```bash
 xcodebuild -scheme ProxyApp -configuration Debug build
 xcodebuild test -scheme ProxyApp -destination 'platform=macOS'
+xcodebuild test -scheme ProxyApp -destination 'platform=macOS' -only-testing:ProxyAppTests/<Class>/<method>  # single test
 ```
+
+`AGENTS.md` (Codex) is an older, partly stale copy of this file (e.g. `/tmp` PID file, `localhost` API) — this file is the source of truth.
 
 The Xcode build phase **"Build proxycore (Go)"** recompiles the daemon from `ProxyCore/` on every build and writes it to `ProxyApp/ProxyCore/proxycore`, which is copied into the app bundle. That binary is a build artifact (gitignored) — never edit or commit it.
 
