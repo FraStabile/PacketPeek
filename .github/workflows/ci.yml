@@ -6,6 +6,9 @@ on:
   push:
     branches: [develop]
 
+permissions:
+  contents: read
+
 jobs:
   go:
     runs-on: ubuntu-latest
