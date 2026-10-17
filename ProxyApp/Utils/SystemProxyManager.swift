@@ -26,6 +26,19 @@ final class SystemProxyManager {
     private let host = "127.0.0.1"
     private let port = 8080
     private let defaultsKey = "PacketPeek.systemProxy.enabledServices"
+    private let defaults: UserDefaults
+    /// Runs a shell snippet with admin privileges and returns the exit status
+    /// (0 = success). Injectable so tests never touch the real system proxy.
+    private let syncAdminRunner: (String) -> Int32
+
+    init(defaults: UserDefaults = .standard,
+         syncAdminRunner: @escaping (String) -> Int32 = SystemProxyManager.runAsAdminSync) {
+        self.defaults = defaults
+        self.syncAdminRunner = syncAdminRunner
+    }
+
+    /// True when a previous enable left the "proxy is on" record behind.
+    var hasPendingCleanup: Bool { defaults.stringArray(forKey: defaultsKey) != nil }
 
     private(set) var isEnabled: Bool = false
 
@@ -44,14 +57,14 @@ final class SystemProxyManager {
             lines.append("/usr/sbin/networksetup -setsecurewebproxystate \"\(q)\" on")
         }
         try await runAsAdmin(shell: lines.joined(separator: " && "))
-        UserDefaults.standard.set(services, forKey: defaultsKey)
+        defaults.set(services, forKey: defaultsKey)
         isEnabled = true
     }
 
     /// Disables HTTP + HTTPS proxy on the services we previously enabled (or
     /// all currently active ones if we have no record).
     func disable() async throws {
-        let services = UserDefaults.standard.stringArray(forKey: defaultsKey)
+        let services = defaults.stringArray(forKey: defaultsKey)
             ?? (try? activeNetworkServices())
             ?? []
         guard !services.isEmpty else {
@@ -66,7 +79,7 @@ final class SystemProxyManager {
             lines.append("/usr/sbin/networksetup -setsecurewebproxystate \"\(q)\" off")
         }
         try await runAsAdmin(shell: lines.joined(separator: " ; "))
-        UserDefaults.standard.removeObject(forKey: defaultsKey)
+        defaults.removeObject(forKey: defaultsKey)
         isEnabled = false
     }
 
@@ -74,25 +87,41 @@ final class SystemProxyManager {
     /// daemon is not running, clear it so the user isn't stranded offline.
     func cleanupStaleStateIfNeeded() async {
         guard !AppEnvironment.isRunningTests() else { return }
-        guard UserDefaults.standard.stringArray(forKey: defaultsKey) != nil else { return }
+        guard hasPendingCleanup else { return }
+        // On failure (e.g. admin dialog cancelled) the record is kept, so
+        // the next launch retries.
         try? await disable()
     }
 
-    /// Synchronous variant for app-quit, where we cannot await. Builds the
-    /// same osascript and runs it via `Process.waitUntilExit()`.
-    func disableSynchronously() {
-        let services = UserDefaults.standard.stringArray(forKey: defaultsKey) ?? []
+    /// Synchronous variant for app-quit, where we cannot await. The record in
+    /// UserDefaults is removed ONLY when osascript exits with status 0: if the
+    /// user cancels the admin dialog the proxy is still on, so the flag stays
+    /// and `cleanupStaleStateIfNeeded()` retries at the next launch.
+    @discardableResult
+    func disableSynchronously() -> Bool {
+        let services = defaults.stringArray(forKey: defaultsKey) ?? []
         guard !services.isEmpty else {
             isEnabled = false
-            return
+            return true
         }
+        let status = syncAdminRunner(Self.disableScript(for: services))
+        guard status == 0 else { return false }
+        defaults.removeObject(forKey: defaultsKey)
+        isEnabled = false
+        return true
+    }
+
+    nonisolated static func disableScript(for services: [String]) -> String {
         var lines: [String] = []
         for svc in services {
             let q = svc.replacingOccurrences(of: "\"", with: "\\\"")
             lines.append("/usr/sbin/networksetup -setwebproxystate \"\(q)\" off")
             lines.append("/usr/sbin/networksetup -setsecurewebproxystate \"\(q)\" off")
         }
-        let shell = lines.joined(separator: " ; ")
+        return lines.joined(separator: " ; ")
+    }
+
+    nonisolated static func runAsAdminSync(shell: String) -> Int32 {
         let escaped = shell
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
@@ -102,10 +131,9 @@ final class SystemProxyManager {
         process.arguments = ["-e", script]
         process.standardOutput = Pipe()
         process.standardError = Pipe()
-        try? process.run()
+        do { try process.run() } catch { return -1 }
         process.waitUntilExit()
-        UserDefaults.standard.removeObject(forKey: defaultsKey)
-        isEnabled = false
+        return process.terminationStatus
     }
 
     // MARK: - Helpers

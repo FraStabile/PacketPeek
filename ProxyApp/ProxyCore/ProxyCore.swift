@@ -90,10 +90,24 @@ final class ProxyCore: ObservableObject {
                 kill(proc.processIdentifier, SIGKILL)
             }
         }
-        // Catch any zombie proxycore we may have lost the handle to.
-        _ = try? Process.run(URL(fileURLWithPath: "/usr/bin/pkill"),
-                             arguments: ["-f", "proxycore"])
+        // Catch a zombie proxycore we lost the handle to, by PID (never by
+        // name: that would kill unrelated processes).
+        terminateStaleDaemonByPID()
         systemProxy.disableSynchronously()
+    }
+
+    /// Terminates a leftover daemon identified by the PID file, but only if
+    /// that PID still runs OUR installed proxycore binary.
+    private func terminateStaleDaemonByPID() {
+        let pidFile = workingDirectory.appendingPathComponent("packetpeek.pid")
+        guard let text = try? String(contentsOf: pidFile, encoding: .utf8),
+              let pid = pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines)),
+              pid > 1
+        else { return }
+        var buf = [CChar](repeating: 0, count: 4096)
+        guard proc_pidpath(pid, &buf, UInt32(buf.count)) > 0,
+              String(cString: buf) == installer.execURL.path else { return }
+        kill(pid, SIGTERM)
     }
 
     // MARK: - Process lifecycle
