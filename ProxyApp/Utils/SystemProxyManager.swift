@@ -73,6 +73,7 @@ final class SystemProxyManager {
     /// Called at app launch: if a previous session left proxy ON but the
     /// daemon is not running, clear it so the user isn't stranded offline.
     func cleanupStaleStateIfNeeded() async {
+        guard !AppEnvironment.isRunningTests() else { return }
         guard UserDefaults.standard.stringArray(forKey: defaultsKey) != nil else { return }
         try? await disable()
     }

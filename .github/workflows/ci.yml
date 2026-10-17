@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop]
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ProxyCore/go.mod
+      - name: go vet
+        working-directory: ProxyCore
+        run: go vet ./...
+      - name: go test
+        working-directory: ProxyCore
+        run: go test -race ./...
+
+  swift:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ProxyCore/go.mod
+      - name: SwiftLint
+        run: |
+          brew install swiftlint
+          swiftlint --reporter github-actions-logging
+      - name: xcodebuild test
+        run: |
+          xcodebuild test -scheme ProxyApp -destination 'platform=macOS' \
+            -skipPackagePluginValidation -skipMacroValidation \
+            CODE_SIGNING_ALLOWED=NO
