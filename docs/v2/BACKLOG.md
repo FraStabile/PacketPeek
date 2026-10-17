@@ -48,7 +48,7 @@ Nota: le voci I-13 e I-07 si basano su codice non letto per intero dall'audit (S
 
 `ProxyCore/proxy/proxy.go` e `ProxyApp/ProxyCore/ProxyCore.swift` sono i file piu contesi: i task che li toccano sono serializzati (una sola issue per ondata su proxy.go).
 
-Corsia proxy.go in ordine: T06 (#11), T05 (#10), T04 (#9), T02 (#7), T09 (#14), T12 (#17), T18 (#23), T13 (#18), T15 (#20), T08 (#13), T23 (#28).
+Corsia proxy.go in ordine (numeri di issue): #11, #10, #9, #7, #14, #17, #23, #18, #20, #13, #28.
 
 Verificare a ogni ondata che i file dichiarati non siano cambiati da PR gia mergiate.
 
@@ -85,13 +85,14 @@ Verificare a ogni ondata che i file dichiarati non siano cambiati da PR gia merg
 ### Ondata 6
 - #17 Budget in byte per il log del daemon e /logs paginato
 - #29 Pulizia: codice morto, print -> os.Logger, import duplicati, copiedKey
-- #37 Layout: persistere il divisore, stato reale degli step del welcome
 - #38 Sidebar row, AddAppSheet e Settings: a11y, shortcut, stati
+- #16 ProxyCore.swift: stato connessione corretto e decode WS fuori dal main actor
 
 ### Ondata 7
 - #23 Header come liste ordinate nome/valore (Set-Cookie multipli fedeli)
 - #30 Sidebar: aggiornamento incrementale invece di ricostruire l'albero ogni 250 ms
 - #31 Igiene repo e CA nella storia git
+- #37 Layout: persistere il divisore, stato reale degli step del welcome
 
 ### Ondata 8
 - #18 Verifica TLS upstream di default con toggle nelle impostazioni
