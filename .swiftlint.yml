@@ -1,0 +1,23 @@
+included:
+  - ProxyApp
+  - ProxyAppTests
+excluded:
+  - ProxyApp/Preview Content
+  - ProxyCore
+disabled_rules:
+  - trailing_whitespace
+  - identifier_name
+  - type_name
+  - todo
+line_length:
+  warning: 160
+  error: 250
+file_length:
+  warning: 600
+  error: 1200
+function_body_length:
+  warning: 80
+  error: 150
+type_body_length:
+  warning: 400
+  error: 800
