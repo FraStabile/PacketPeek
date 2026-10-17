@@ -31,6 +31,7 @@ struct ProxyAppApp: App {
         WindowGroup {
             ContentView(proxyCore: proxyCore)
                 .task {
+                    guard !AppEnvironment.isRunningTests() else { return }
                     await SystemProxyManager.shared.cleanupStaleStateIfNeeded()
                 }
                 .sheet(item: $modalRouter.activeModal) { modal in

@@ -72,6 +72,7 @@ final class ProxyCore: ObservableObject {
     /// cannot await async tasks. Sends SIGTERM, then SIGKILLs as a fallback,
     /// then synchronously disables the system proxy via osascript.
     private func shutdownSynchronously() {
+        guard !AppEnvironment.isRunningTests() else { return }
         stopReceiveLoops()
         if let proc = goProcess, proc.isRunning {
             proc.terminate()
@@ -93,7 +94,7 @@ final class ProxyCore: ObservableObject {
     // MARK: - Process lifecycle
 
     func startDaemon() {
-        guard goProcess == nil else { return }
+        guard goProcess == nil, !AppEnvironment.isRunningTests() else { return }
 
         // Refuse to start if something else holds 8080/8081 — spawning anyway
         // would exit non-zero and leave the user wondering why the app shows

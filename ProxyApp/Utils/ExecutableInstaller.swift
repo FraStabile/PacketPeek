@@ -21,6 +21,7 @@ final class ExecutableInstaller {
     }
     
     init() {
+        guard !AppEnvironment.isRunningTests() else { return }
         installOrUpdateExecutableIfNeeded()
     }
     
