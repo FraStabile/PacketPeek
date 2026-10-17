@@ -35,6 +35,8 @@ final class ProxyCore: ObservableObject {
     private let executableName = "proxycore"
     private var goProcess: Process?
     private var webSocketTask: URLSessionWebSocketTask?
+    /// Max WebSocket frame size accepted from the daemon (16 MiB).
+    static let webSocketMaximumMessageSize = 16 * 1024 * 1024
     private var session: URLSession
     private var reconnectTask: Task<Void, Never>?
     private var receiveLoopTask: Task<Void, Never>?
@@ -255,6 +257,9 @@ final class ProxyCore: ObservableObject {
         }
 
         let task = session.webSocketTask(with: request)
+        // Default is 1 MiB: a log with ~1 MiB req + resp bodies (base64 in JSON) would exceed it
+        // and drop the socket in a reconnect loop.
+        task.maximumMessageSize = Self.webSocketMaximumMessageSize
         webSocketTask = task
         task.resume()
         connectionState = .connected
