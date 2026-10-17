@@ -13,6 +13,8 @@ struct LogDetailView: View {
     @State private var requestTab: Tab = .summary
     @State private var responseTab: Tab = .summary
     @State private var copiedKey: String?
+    @State private var revealRequest = false
+    @State private var revealResponse = false
 
     enum Tab: String, CaseIterable, Identifiable {
         case summary = "Summary"
@@ -109,7 +111,7 @@ struct LogDetailView: View {
                 ("Time", log.timestamp.formatted()),
             ])
         case .headers:
-            kvTable(headers: log.requestHeaders)
+            kvTable(headers: log.requestHeaders, reveal: $revealRequest)
         case .body:
             jsonBody(log.requestBody ?? "")
         case .chart:
@@ -127,7 +129,7 @@ struct LogDetailView: View {
                 ("Completed", log.completed.formatted()),
             ])
         case .headers:
-            kvTable(headers: log.responseHeaders)
+            kvTable(headers: log.responseHeaders, reveal: $revealResponse)
         case .body:
             jsonBody(log.responseBody ?? "")
         case .chart:
@@ -155,27 +157,45 @@ struct LogDetailView: View {
         .padding(.vertical, Spacing.sm)
     }
 
-    private func kvTable(headers: [String: String]) -> some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(headers.sorted(by: { $0.key < $1.key }), id: \.key) { key, value in
-                    HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
-                        Text(key)
-                            .font(Typography.captionMono)
-                            .foregroundStyle(Surface.secondaryText)
-                            .frame(width: 140, alignment: .leading)
-                        Text(value)
-                            .font(Typography.captionMono)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        CopyButton(value: value, label: key, compact: true)
-                            .opacity(copiedKey == key ? 1 : 0.5)
+    private func kvTable(headers: [String: String], reveal: Binding<Bool>) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            if HeaderRedactor.hasSensitive(headers) {
+                Button {
+                    if reveal.wrappedValue {
+                        reveal.wrappedValue = false
+                    } else if confirmReveal(action: "shown") {
+                        reveal.wrappedValue = true
                     }
-                    .padding(.vertical, Spacing.xs)
-                    Divider()
+                } label: {
+                    Label(reveal.wrappedValue ? "Mask sensitive values" : "Reveal sensitive values…",
+                          systemImage: reveal.wrappedValue ? "eye.slash" : "eye")
+                        .font(Typography.badge)
                 }
+                .buttonStyle(.borderless)
+                .foregroundStyle(Surface.secondaryText)
             }
-            .padding(.vertical, Spacing.sm)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(headers.sorted(by: { $0.key < $1.key }), id: \.key) { key, rawValue in
+                        let value = HeaderRedactor.value(for: key, rawValue, reveal: reveal.wrappedValue)
+                        HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
+                            Text(key)
+                                .font(Typography.captionMono)
+                                .foregroundStyle(Surface.secondaryText)
+                                .frame(width: 140, alignment: .leading)
+                            Text(value)
+                                .font(Typography.captionMono)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            CopyButton(value: value, label: key, compact: true)
+                                .opacity(copiedKey == key ? 1 : 0.5)
+                        }
+                        .padding(.vertical, Spacing.xs)
+                        Divider()
+                    }
+                }
+                .padding(.vertical, Spacing.sm)
+            }
         }
     }
 
