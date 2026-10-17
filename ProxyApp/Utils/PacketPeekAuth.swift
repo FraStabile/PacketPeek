@@ -5,9 +5,9 @@
 //  Reads the bearer token produced by the Go daemon on startup. The token file
 //  lives at FileManagerUrls.apiTokenURL with 0600 permissions; we cache it in
 //  memory and reload when invalidateCache() is called (e.g. after a daemon
-//  restart). The Go API only enforces this token when PACKETPEEK_AUTH=required
-//  is set in its environment — until then this is best-effort and used to
-//  pre-stage Phase 1 security work without breaking the MVP.
+//  restart). The Go API always requires it on /logs, /ws and /api/* (only
+//  /health, /welcome and /cert/* are public). MainProvider attaches it to
+//  every Papyrus request; ProxyCore attaches it to the WebSocket handshake.
 //
 
 import Foundation

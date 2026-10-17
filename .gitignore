@@ -1,3 +1,23 @@
 build
 
+# --- Secrets: the root CA private key must never be committed ---
+ProxyCore/ca.key
+ProxyCore/ca.pem
+*.key
+
+# --- Daemon runtime state (lives in ~/Library/Application Support/PacketPeekRuntime) ---
+ProxyCore/mocks.json
+ProxyCore/monitored_apps.json
+*.log
+
+# --- Build artifacts: proxycore is rebuilt from Go sources by the Xcode build phase ---
+ProxyCore/proxycore
+ProxyApp/ProxyCore/proxycore
+
+# --- Xcode / tooling noise ---
+xcuserdata/
+*.profraw
+.DS_Store
+
+# --- Claude Code local workspace ---
 .claude/work/

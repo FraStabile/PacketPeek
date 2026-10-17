@@ -11,10 +11,9 @@ struct GeneralSettingView: View {
     @State private var selectedLanguage = "en"
     @State private var notificationsEnabled = true
     @State private var launchAtLogin = false
+    @State private var confirmCleanup = false
     @InjectProps private var settingManager: SettingsManagerProtocol
-    private var viewModel: GeneralSettingViewModel {
-        return GeneralSettingViewModel()
-    }
+    @StateObject private var viewModel = GeneralSettingViewModel()
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             Text("Impostazioni Generali")
@@ -34,10 +33,27 @@ struct GeneralSettingView: View {
                 }
             }
             
-            settingRow(title: "Svuota Cache") {
-                Button("Cancel") {
-                    viewModel.clearRuntimeCache()
+            settingRow(title: "File temporanei") {
+                Button("Elimina file temporanei…", role: .destructive) {
+                    confirmCleanup = true
                 }
+                .confirmationDialog(
+                    "Eliminare i file temporanei?",
+                    isPresented: $confirmCleanup,
+                    titleVisibility: .visible
+                ) {
+                    Button("Elimina", role: .destructive) {
+                        viewModel.clearTemporaryFiles()
+                    }
+                    Button("Annulla", role: .cancel) {}
+                } message: {
+                    Text("Rimuove file temporanei e log rimasti nella cartella runtime. Mock, app monitorate, impostazioni e certificato CA non vengono toccati.")
+                }
+            }
+            if let message = viewModel.lastCleanupMessage {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             
