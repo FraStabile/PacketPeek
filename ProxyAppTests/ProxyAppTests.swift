@@ -195,3 +195,44 @@ struct TransactionExporterTests {
         #expect(text.contains("Set-Cookie: sid=SECRET2"))
     }
 }
+
+struct MockJSONWarningTests {
+    @Test func validOrEmptyBodyHasNoWarning() {
+        #expect(MockModalEditViewModel.jsonWarning(for: "") == nil)
+        #expect(MockModalEditViewModel.jsonWarning(for: "  {\"a\": [1, 2]}\n") == nil)
+    }
+
+    @Test func invalidBodyWarns() {
+        #expect(MockModalEditViewModel.jsonWarning(for: "{\"a\": ") != nil)
+        #expect(MockModalEditViewModel.jsonWarning(for: "<html>") != nil)
+    }
+}
+
+@MainActor
+struct SystemProxyManagerTests {
+    private static let key = "PacketPeek.systemProxy.enabledServices"
+
+    private func makeDefaults() -> UserDefaults {
+        let suite = "SystemProxyManagerTests-\(UUID().uuidString)"
+        return UserDefaults(suiteName: suite)!
+    }
+
+    @Test func keepsFlagWhenAdminCommandFails() {
+        let defaults = makeDefaults()
+        defaults.set(["Wi-Fi"], forKey: Self.key)
+        let manager = SystemProxyManager(defaults: defaults, syncAdminRunner: { _ in 1 })
+        #expect(manager.disableSynchronously() == false)
+        #expect(defaults.stringArray(forKey: Self.key) == ["Wi-Fi"])
+        #expect(manager.hasPendingCleanup)
+    }
+
+    @Test func clearsFlagOnlyOnSuccess() {
+        let defaults = makeDefaults()
+        defaults.set(["Wi-Fi"], forKey: Self.key)
+        var script = ""
+        let manager = SystemProxyManager(defaults: defaults, syncAdminRunner: { script = $0; return 0 })
+        #expect(manager.disableSynchronously())
+        #expect(defaults.stringArray(forKey: Self.key) == nil)
+        #expect(script.contains("-setwebproxystate \"Wi-Fi\" off"))
+    }
+}

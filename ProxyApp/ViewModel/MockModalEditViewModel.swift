@@ -47,6 +47,27 @@ class MockModalEditViewModel: BaseViewModel {
     /// on save; nil when creating a new mock from a captured request.
     private var existingMock: MockItemRequest?
 
+    /// True when editing an existing mock, false when creating from a request.
+    var isEditing: Bool { existingMock != nil }
+
+    /// Inline JSON check for the response editor. Nil when the body is empty
+    /// or valid JSON; otherwise a short description. Non-blocking: non-JSON
+    /// bodies (plain text, HTML) are legitimate mock responses.
+    var jsonWarning: String? {
+        Self.jsonWarning(for: response)
+    }
+
+    nonisolated static func jsonWarning(for text: String) -> String? {
+        let trimmed = text.trim()
+        guard !trimmed.isEmpty else { return nil }
+        do {
+            _ = try JSONSerialization.jsonObject(with: Data(trimmed.utf8), options: [.fragmentsAllowed])
+            return nil
+        } catch {
+            return "Not valid JSON"
+        }
+    }
+
     func dismiss() {
         isPresented = false
     }
@@ -80,12 +101,12 @@ class MockModalEditViewModel: BaseViewModel {
     /// Validates the form and returns the field values, or sets errorMessage.
     private func validatedInput() -> (status: Int, latency: Int)? {
         guard let status = Int(statusCode.trim()), (100...599).contains(status) else {
-            errorMessage = "Status code non valido: inserisci un numero tra 100 e 599."
+            errorMessage = "Invalid status code: enter a number between 100 and 599."
             return nil
         }
         let latencyText = latency.trim()
         guard let latencyMS = latencyText.isEmpty ? 0 : Int(latencyText), latencyMS >= 0 else {
-            errorMessage = "Latenza non valida: inserisci un numero di millisecondi ≥ 0."
+            errorMessage = "Invalid latency: enter a number of milliseconds ≥ 0."
             return nil
         }
         return (status, latencyMS)
@@ -138,7 +159,7 @@ class MockModalEditViewModel: BaseViewModel {
             try await repo.updateMock(requestData)
             return true
         } catch {
-            errorMessage = "Salvataggio non riuscito: \(error.localizedDescription)"
+            errorMessage = "Save failed: \(error.localizedDescription)"
             return false
         }
     }
