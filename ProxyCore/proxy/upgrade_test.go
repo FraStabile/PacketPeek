@@ -139,3 +139,110 @@ func TestHTTPStripsHopByHopHeaders(t *testing.T) {
 		t.Error("end-to-end header dropped")
 	}
 }
+
+// closeNotifyUpgradeHandler upgrades, then reports when the upstream side
+// of the relay sees EOF/close.
+func closeNotifyUpgradeHandler(closed chan<- struct{}) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, rw, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		rw.WriteString("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nProxy-Connection: keep-alive\r\n\r\n")
+		rw.Flush()
+		_, _ = io.Copy(io.Discard, rw)
+		close(closed)
+	})
+}
+
+func find101(p *ProxyServer) *RequestLog {
+	for _, l := range p.GetLogs() {
+		if l.StatusCode == 101 {
+			l := l
+			return &l
+		}
+	}
+	return nil
+}
+
+func TestUpgradeIdleTimeoutClosesRelay(t *testing.T) {
+	p, front := newTestProxy(t)
+	p.upgradedIdleTimeout = 200 * time.Millisecond
+	closed := make(chan struct{})
+	up := httptest.NewServer(closeNotifyUpgradeHandler(closed))
+	defer up.Close()
+
+	conn, err := net.Dial("tcp", front.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	fmt.Fprintf(conn, upgradeReq, up.URL+"/ws", strings.TrimPrefix(up.URL, "http://"))
+	br := bufio.NewReader(conn)
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
+	resp, err := http.ReadResponse(br, nil)
+	if err != nil || resp.StatusCode != 101 {
+		t.Fatalf("resp %v err %v", resp, err)
+	}
+	if resp.Header.Get("Proxy-Connection") != "" {
+		t.Error("hop-by-hop header leaked in 101")
+	}
+	// Silence: the relay must close the client side and the upstream side.
+	if _, err := br.ReadByte(); err == nil {
+		t.Fatal("expected close")
+	}
+	select {
+	case <-closed:
+	case <-time.After(3 * time.Second):
+		t.Fatal("upstream side not closed")
+	}
+	l := find101(p)
+	if l == nil || l.ResponseTime < 0 || l.Completed.IsZero() {
+		t.Fatalf("missing/incomplete 101 log: %+v", l)
+	}
+}
+
+func TestUpgradeClientCloseReleasesUpstream(t *testing.T) {
+	p, front := newTestProxy(t)
+	closed := make(chan struct{})
+	up := httptest.NewServer(closeNotifyUpgradeHandler(closed))
+	defer up.Close()
+
+	conn, err := net.Dial("tcp", front.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Fprintf(conn, upgradeReq, up.URL+"/ws", strings.TrimPrefix(up.URL, "http://"))
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
+	if resp, err := http.ReadResponse(bufio.NewReader(conn), nil); err != nil || resp.StatusCode != 101 {
+		t.Fatalf("resp %v err %v", resp, err)
+	}
+	conn.Close()
+	select {
+	case <-closed:
+	case <-time.After(3 * time.Second):
+		t.Fatal("upstream not released after client close")
+	}
+	if find101(p) == nil {
+		t.Fatal("101 not logged")
+	}
+}
+
+func TestHTTPSUpgradeIsLogged(t *testing.T) {
+	p, front := newTestProxy(t)
+	up := httptest.NewTLSServer(echoUpgradeHandler(nil))
+	defer up.Close()
+	host := strings.TrimPrefix(up.URL, "https://")
+	conn, _ := connectRawTo(t, front, host)
+	defer conn.Close()
+	tc := tls.Client(conn, &tls.Config{InsecureSkipVerify: true, ServerName: "127.0.0.1"})
+	if err := tc.Handshake(); err != nil {
+		t.Fatal(err)
+	}
+	fmt.Fprintf(tc, upgradeReq, "/ws", host)
+	expectEcho(t, tc, bufio.NewReader(tc))
+	if find101(p) == nil {
+		t.Fatal("101 not logged")
+	}
+}
